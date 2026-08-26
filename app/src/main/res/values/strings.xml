@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Mirovoy TV</string>
+    <string name="loading">Yuklanmoqda…</string>
+    <string name="search_hint">Kanal qidirish…</string>
+    <string name="no_channels">Kanal topilmadi.</string>
+    <string name="load_error">Xatolik: ro\'yxatni yuklab bo\'lmadi. Internetni tekshiring. (%1$s)</string>
+    <string name="stream_error">Oqim xatoligi: %1$s hozircha mavjud emas</string>
+    <string name="retry">Qayta urinish</string>
+
+    <string name="category_all">BARCHASI</string>
+    <string name="category_other">BOSHQA</string>
+
+    <string name="menu_open">Menyuni ochish</string>
+    <string name="menu_close">Menyuni yopish</string>
+    <string name="menu_channels_title">Kanallar</string>
+    <string name="menu_all_channels">Barcha kanallar</string>
+    <string name="menu_telegram">Telegram kanalimiz</string>
+    <string name="menu_about">Ilova haqida</string>
+    <string name="menu_categories_title">KATEGORIYALAR</string>
+
+    <string name="about_title">Mirovoy TV haqida</string>
+    <string name="about_body">Mirovoy TV — bepul jonli translyatsiya ilovasi.\n\nYangiliklar va kanallar ro\'yxati uchun Telegram kanalimizga qo\'shiling:\nt.me/mirovoytvuz</string>
+    <string name="about_ok">Yopish</string>
+
+    <string name="player_channels_button">Kanallarni ko\'rish</string>
+    <string name="player_back_button">Orqaga</string>
+    <string name="live_badge">JONLI</string>
+</resources>

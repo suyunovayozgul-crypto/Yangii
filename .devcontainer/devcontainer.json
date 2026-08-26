@@ -1,0 +1,5 @@
+{
+  "name": "SignalIPTV Android Build",
+  "image": "mingc/android-build-box:latest",
+  "postCreateCommand": "chmod +x gradlew 2>/dev/null || true; echo 'Muhit tayyor. Yig\\'ish uchun: gradle assembleDebug'"
+}
