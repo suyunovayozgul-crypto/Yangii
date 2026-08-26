@@ -1,0 +1,55 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kodni yuklab olish
+        uses: actions/checkout@v4
+
+      - name: JDK 17 o'rnatish
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Gradle o'rnatish
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.8'
+
+      - name: APK yig'ish (debug)
+        run: gradle assembleDebug --no-daemon
+
+      - name: Fayl nomini aniqlash
+        id: apk
+        run: |
+          APK_PATH=$(find app/build/outputs/apk/debug -name "*.apk" | head -n 1)
+          echo "path=$APK_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Artifact sifatida ham saqlash (zaxira)
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: ${{ steps.apk.outputs.path }}
+
+      - name: Doimiy yuklab olish havolasini yaratish/yangilash
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: "Eng so'nggi build"
+          body: |
+            Avtomatik yig'ilgan APK — har push'da yangilanadi.
+            Commit: ${{ github.sha }}
+          prerelease: true
+          files: ${{ steps.apk.outputs.path }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
