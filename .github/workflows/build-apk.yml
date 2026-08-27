@@ -3,57 +3,37 @@ name: Build APK
 on:
   push:
     branches: [ main ]
-  workflow_dispatch: {}
-
-permissions:
-  contents: write
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Kodni yuklab olish
+      - name: Kodni olish
         uses: actions/checkout@v4
 
       - name: JDK 17 o'rnatish
         uses: actions/setup-java@v4
         with:
-          distribution: temurin
+          distribution: 'temurin'
           java-version: '17'
 
-      # MUHIM: loyihada "gradlew" fayli yo'q edi (shu sabab avvalgi
-      # urinish 7 soniyada yiqilgan) — shuning uchun Gradle'ni
-      # to'g'ridan-to'g'ri shu qadam orqali o'rnatamiz, "gradlew"ga
-      # umuman muhtoj emasmiz.
-      - name: Gradle o'rnatish
+      - name: Android SDK o'rnatish
+        uses: android-actions/setup-android@v3
+
+      - name: Kerakli SDK platformasini o'rnatish (compileSdk 36)
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Gradle o'rnatish va ishga tushirish
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.8'
+          gradle-version: '8.9'
 
-      - name: APK yig'ish (debug)
-        run: gradle assembleDebug --no-daemon
+      - name: Debug APK yasash
+        run: gradle assembleDebug --stacktrace
 
-      - name: Fayl nomini aniqlash
-        id: apk
-        run: |
-          APK_PATH=$(find app/build/outputs/apk/debug -name "*.apk" | head -n 1)
-          echo "path=$APK_PATH" >> "$GITHUB_OUTPUT"
-
-      - name: Artifact sifatida ham saqlash (zaxira)
+      - name: APK'ni saqlash (Actions natijasida yuklab olish uchun)
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug
-          path: ${{ steps.apk.outputs.path }}
-
-      - name: Doimiy yuklab olish havolasini yaratish/yangilash
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: latest
-          name: "Eng so'nggi build"
-          body: |
-            Avtomatik yig'ilgan APK — har push'da yangilanadi.
-            Commit: ${{ github.sha }}
-          prerelease: true
-          files: ${{ steps.apk.outputs.path }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: SignalIPTV-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
