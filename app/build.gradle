@@ -14,12 +14,12 @@ android {
         versionCode 1
         versionName "1.0"
 
-        // libvlc-all va boshqa native kutubxonalar (FFmpeg) 4 xil protsessor
-        // arxitekturasi uchun fayl qo'shadi: arm64-v8a, armeabi-v7a, x86, x86_64.
-        // Haqiqiy telefon va Smart TV pristavkalarning deyarli barchasi ARM
-        // protsessorli — x86/x86_64 esa faqat kompyuter emulyatorlari uchun
-        // kerak. Ularni olib tashlash APK hajmini sezilarli kamaytiradi va
-        // hech qanday real qurilmaga ta'sir qilmaydi.
+        // FFmpeg dekoder kutubxonasi (nextlib) arm64-v8a/armeabi-v7a'dan
+        // tashqari x86/x86_64 uchun ham fayl qo'shadi. Haqiqiy telefon va
+        // Smart TV pristavkalarning deyarli barchasi ARM protsessorli —
+        // x86/x86_64 esa faqat kompyuter emulyatorlari uchun kerak. Ularni
+        // olib tashlash APK hajmini kamaytiradi va real qurilmaga ta'sir
+        // qilmaydi.
         ndk {
             abiFilters "armeabi-v7a", "arm64-v8a"
         }
@@ -64,6 +64,17 @@ dependencies {
     implementation 'androidx.media3:media3-datasource:1.10.1'
     implementation 'androidx.media3:media3-ui:1.10.1'
 
+    // OkHttp asosidagi tarmoq qatlami. Android'ning eski, oddiy
+    // HttpURLConnection'i (avval ishlatilgan DefaultHttpDataSource) ba'zi
+    // IPTV serverlarda (ayniqsa Cloudflare orqasida turganlarda) "bot"likka
+    // o'xshab, jimgina rad etiladi — xato ham bermaydi, shunchaki hech narsa
+    // yubormaydi. Televizo kabi ko'plab professional pleyerlar aynan OkHttp
+    // ishlatadi (HTTP/2, ulanishni qayta ishlatish, zamonaviyroq TLS
+    // muzokarasi) — shu serverlarda ko'proq "haqiqiy pleyer"ga o'xshab
+    // ko'rinadi va rad etilmaydi.
+    implementation 'androidx.media3:media3-datasource-okhttp:1.10.1'
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+
     // FFmpeg-based audio decoder for Media3 (AC-3 / E-AC-3 / DTS va h.k.).
     // Ko'p bepul IPTV kanallari shu kodeklarda audio yuboradi va Android'ning
     // standart MediaCodec dekoderi ularni har doim ham qo'llab-quvvatlamaydi —
@@ -72,9 +83,4 @@ dependencies {
 
     // Channel logos
     implementation 'com.github.bumptech.glide:glide:4.16.0'
-
-    // ZAXIRA (fallback) pleyer — ExoPlayer ochira olmagan "nostandart"
-    // kanallar uchun. VLC ichida o'zining ffmpeg-ga o'xshash dekoder
-    // to'plami bor va deyarli har qanday oqim formatini o'qiy oladi.
-    implementation 'org.videolan.android:libvlc-all:3.6.0'
 }

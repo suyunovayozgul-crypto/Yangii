@@ -16,18 +16,6 @@
              Jonli TV kanal uchun bularning hech biri kerak emas va aynan shular
              "sekund sanab" ko'rinishga sabab bo'lgan. O'rniga pastda o'zimizning
              overlay boshqaruvimiz bor. -->
-        <!-- ExoPlayer ocholmagan kanallar uchun ZAXIRA pleyer (VLC).
-             Odatiy holatda YASHIRIN turadi — faqat ExoPlayer bir necha marta
-             urinib ham ochira olmasa, shu ko'rinadi. VLC deyarli har qanday
-             IPTV oqim formatini o'qiy oladi, shu bois ba'zi "ochilmaydigan"
-             kanallar uchun najotkor bo'ladi. -->
-        <SurfaceView
-            android:id="@+id/vlcSurface"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:background="#000000"
-            android:visibility="gone" />
-
         <androidx.media3.ui.PlayerView
             android:id="@+id/playerView"
             android:layout_width="match_parent"

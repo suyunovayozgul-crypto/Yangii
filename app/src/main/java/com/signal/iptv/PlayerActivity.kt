@@ -29,7 +29,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
-import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -40,13 +40,11 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.NextRenderersFactory
 import androidx.media3.exoplayer.DefaultRenderersFactory
-import android.view.SurfaceView
-import org.videolan.libvlc.LibVLC
-import org.videolan.libvlc.Media
-import org.videolan.libvlc.MediaPlayer
+import okhttp3.OkHttpClient
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 
 class PlayerActivity : AppCompatActivity() {
@@ -55,6 +53,21 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var trackSelector: DefaultTrackSelector
     private val executor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    // OkHttp mijozi bitta marta yaratiladi va barcha kanallar (va qayta
+    // urinishlar) uchun qayta ishlatiladi — ulanish poolini saqlab qolish
+    // uchun bu muhim, har safar yangi OkHttpClient yaratish bu afzallikni
+    // yo'qqa chiqaradi.
+    private val okHttpClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+            .writeTimeout(15, TimeUnit.SECONDS)
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .retryOnConnectionFailure(true)
+            .build()
+    }
 
     private var allChannels: List<Channel> = emptyList()
     private var categories: List<String> = emptyList()
@@ -77,20 +90,13 @@ class PlayerActivity : AppCompatActivity() {
     // Ba'zi o'lik/geo-blok qilingan IPTV serverlar ulanishni na xato beradi,
     // na yopadi — shunchaki hech narsa yubormay, cheksiz "buffering" holatida
     // ushlab turadi. Bunday holatda ExoPlayer'ning onPlayerError() HECH QACHON
-    // chaqirilmaydi, shuning uchun pastdagi butun qayta urinish/VLC zanjiri
+    // chaqirilmaydi, shuning uchun pastdagi butun qayta urinish zanjiri
     // ishga tushmay qoladi — aynan shu "qora ekran, abadiy yuklanadi" holatiga
     // sabab bo'lgan joy. Yechim: prepare() chaqirilganda mustaqil taymer
     // boshlaymiz; agar OPEN_TIMEOUT_MS ichida STATE_READY'ga yetmasa — buni
     // xuddi xatolik kelgandek qabul qilib, xuddi shu tiklash zanjirini
     // qo'lda ishga tushiramiz.
     private var openWatchdogRunnable: Runnable? = null
-
-    // === VLC (zaxira pleyer) holati ===
-    // ExoPlayer bir necha marta urinib ham ochira olmagan kanal uchun,
-    // xato ko'rsatishdan OLDIN, shu bitta kanalni VLC bilan sinab ko'ramiz.
-    private var libVLC: LibVLC? = null
-    private var vlcMediaPlayer: MediaPlayer? = null
-    private var usingVlcFallback = false
     private val maxSoftRetries: Int = 2
 
     // Ekran to'ldirish rejimlari orasida aylanish (kichik/katta ekran).
@@ -104,7 +110,6 @@ class PlayerActivity : AppCompatActivity() {
 
     private lateinit var channelsOverlay: View
     private lateinit var playerView: PlayerView
-    private lateinit var vlcSurface: SurfaceView
     private lateinit var overlayGroup: View
     private lateinit var titleView: TextView
     private lateinit var programView: TextView
@@ -206,7 +211,6 @@ class PlayerActivity : AppCompatActivity() {
 
         channelsOverlay = findViewById(R.id.channelsOverlay)
         playerView = findViewById(R.id.playerView)
-        vlcSurface = findViewById(R.id.vlcSurface)
         overlayGroup = findViewById(R.id.overlayGroup)
         titleView = findViewById(R.id.playerTitle)
         programView = findViewById(R.id.playerProgram)
@@ -298,15 +302,15 @@ class PlayerActivity : AppCompatActivity() {
     private fun setupPlayer() {
         // Ko'p bepul IPTV serverlari ExoPlayer'ning standart so'rovini
         // (User-Agent'siz yoki noma'lum User-Agent bilan) rad etadi —
-        // brauzerga o'xshash User-Agent va uzunroq timeout beramiz.
-        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+        // brauzerga o'xshash User-Agent va uzunroq timeout beramiz. OkHttp
+        // orqali yuboramiz — Televizo kabi ilovalar bilan bir xil tarmoq
+        // uslubi, ba'zi serverlar oddiy HttpURLConnection'ni sukut bilan
+        // rad etadi.
+        val httpDataSourceFactory = OkHttpDataSource.Factory(okHttpClient)
             .setUserAgent(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
                     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
             )
-            .setConnectTimeoutMs(15000)
-            .setReadTimeoutMs(15000)
-            .setAllowCrossProtocolRedirects(true)
 
         val mediaSourceFactory = DefaultMediaSourceFactory(this)
             .setDataSourceFactory(httpDataSourceFactory)
@@ -381,104 +385,9 @@ class PlayerActivity : AppCompatActivity() {
             hardRecoverAttempted = true
             statusHint(getString(R.string.stream_reconnecting))
             mainHandler.postDelayed({ hardRecoverSilently() }, 1500L)
-        } else if (!usingVlcFallback) {
-            // ExoPlayer bir necha marta urinib ham ocholmadi — bu ko'pincha
-            // "nostandart" oqim formati degani. Xato ko'rsatishdan oldin,
-            // aynan shu bitta kanal uchun VLC'ga o'tib, so'nggi marta
-            // urinib ko'ramiz — VLC deyarli hammasini o'qiydi.
-            statusHint(getString(R.string.stream_reconnecting))
-            tryVlcFallback(channel)
         } else {
             showStreamError(channel.name)
         }
-    }
-
-    /** ExoPlayer ocholmagan kanal uchun — shu bitta kanalga VLC'ni sinab ko'ramiz. */
-    private fun tryVlcFallback(channel: Channel) {
-        usingVlcFallback = true
-        player?.pause()
-        playerView.visibility = View.GONE
-        vlcSurface.visibility = View.VISIBLE
-
-        if (libVLC == null) {
-            libVLC = LibVLC(this, arrayListOf("--no-drop-late-frames", "--no-skip-frames"))
-        }
-        vlcMediaPlayer?.release()
-        val mp = MediaPlayer(libVLC)
-        vlcMediaPlayer = mp
-
-        val vout = mp.vlcVout
-        vout.setVideoView(vlcSurface)
-        vout.attachViews()
-
-        val media = Media(libVLC, android.net.Uri.parse(channel.url))
-        // Ko'p IPTV serverlar User-Agent va Referer/Origin'siz so'rovni rad
-        // etadi (403) — ExoPlayer tomonida ishlatilgan bilan bir xil,
-        // kanalning o'z domenidan yasalgan Referer'ni shu yerga ham beramiz.
-        // network-caching/live-caching qiymatlari VLC'ning jonli oqimlarda
-        // ko'proq barqaror ishlashiga yordam beradi.
-        val referer = deriveReferer(channel)
-        media.addOption(
-            ":http-user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-        )
-        if (referer.isNotBlank()) {
-            media.addOption(":http-referrer=$referer")
-        }
-        media.addOption(":network-caching=1500")
-        media.addOption(":live-caching=1500")
-        media.addOption(":clock-jitter=0")
-        media.addOption(":clock-synchro=0")
-        mp.media = media
-        media.release()
-
-        mp.setEventListener { event ->
-            when (event.type) {
-                MediaPlayer.Event.Playing -> {
-                    runOnUiThread {
-                        retryCount = 0
-                        hardRecoverAttempted = false
-                        hideStreamError()
-                        cancelOpenWatchdog()
-                    }
-                }
-                MediaPlayer.Event.EncounteredError -> {
-                    // VLC ham ocholmadi — endi haqiqatan xato ko'rsatamiz.
-                    runOnUiThread {
-                        cancelOpenWatchdog()
-                        showStreamError(channel.name)
-                    }
-                }
-            }
-        }
-        mp.play()
-
-        // VLC ham xato bermasdan "abadiy yuklanadigan" turdagi o'lik oqimga duch
-        // kelishi mumkin — shu yerda ham mustaqil taymer bilan sug'urtalaymiz.
-        // Bu bosqich zanjirning oxirgi qavati bo'lgani uchun, muddat o'tsa
-        // to'g'ridan-to'g'ri xato ko'rsatamiz (boshqa tiklash urinishisiz).
-        openWatchdogRunnable?.let { mainHandler.removeCallbacks(it) }
-        val vlcTimeoutRunnable = Runnable {
-            if (usingVlcFallback && currentChannel?.url == channel.url &&
-                vlcMediaPlayer?.isPlaying != true
-            ) {
-                showStreamError(channel.name)
-            }
-        }
-        openWatchdogRunnable = vlcTimeoutRunnable
-        mainHandler.postDelayed(vlcTimeoutRunnable, OPEN_TIMEOUT_MS)
-    }
-
-    /** Boshqa kanalga o'tishda yoki ExoPlayer'ga qaytishda VLC'ni tozalab qo'yamiz. */
-    private fun releaseVlcFallback() {
-        if (!usingVlcFallback) return
-        usingVlcFallback = false
-        vlcMediaPlayer?.stop()
-        vlcMediaPlayer?.vlcVout?.detachViews()
-        vlcMediaPlayer?.release()
-        vlcMediaPlayer = null
-        vlcSurface.visibility = View.GONE
-        playerView.visibility = View.VISIBLE
     }
 
     private fun softRetry() {
@@ -540,11 +449,8 @@ class PlayerActivity : AppCompatActivity() {
         val exoPlayer = player ?: return
         val userAgent = channel.userAgent.ifBlank { M3UParser.BROWSER_USER_AGENT }
         val referer = deriveReferer(channel)
-        val httpFactory = DefaultHttpDataSource.Factory()
+        val httpFactory = OkHttpDataSource.Factory(okHttpClient)
             .setUserAgent(userAgent)
-            .setConnectTimeoutMs(15000)
-            .setReadTimeoutMs(15000)
-            .setAllowCrossProtocolRedirects(true)
         if (referer.isNotBlank()) {
             httpFactory.setDefaultRequestProperties(
                 mapOf("Referer" to referer, "Origin" to referer.trimEnd('/'))
@@ -565,7 +471,7 @@ class PlayerActivity : AppCompatActivity() {
      * Agar OPEN_TIMEOUT_MS ichida shu kanal STATE_READY'ga yetmasa — bu
      * "abadiy yuklanadigan" o'lik oqim degani. ExoPlayer o'zi xato bermasa ham,
      * xuddi xatolik kelgandek qayta tiklash zanjirini (softRetry → hardRecover
-     * → VLC → xato ko'rsatish) qo'lda ishga tushiramiz.
+     * → xato ko'rsatish) qo'lda ishga tushiramiz.
      */
     private fun scheduleOpenWatchdog(channel: Channel) {
         cancelOpenWatchdog()
@@ -773,7 +679,6 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     private fun playChannel(channel: Channel) {
-        releaseVlcFallback()
         currentChannel = channel
         retryCount = 0
         hardRecoverAttempted = false
@@ -1119,9 +1024,6 @@ class PlayerActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         mainHandler.removeCallbacksAndMessages(null)
-        releaseVlcFallback()
-        libVLC?.release()
-        libVLC = null
     }
 
     companion object {
@@ -1130,9 +1032,9 @@ class PlayerActivity : AppCompatActivity() {
         private const val OVERLAY_AUTO_HIDE_MS = 4_000L
         private const val STATS_REFRESH_MS = 2_000L
         private const val WATCHDOG_INTERVAL_MS = 8_000L
-        // Shu qadar vaqt ichida kanal ochilmasa (STATE_READY'ga yetmasa yoki
-        // VLC "Playing" bermasa) — "abadiy yuklanadigan" o'lik oqim deb qabul
-        // qilinadi va tiklash zanjiri qo'lda ishga tushiriladi.
+        // Shu qadar vaqt ichida kanal STATE_READY'ga yetmasa — "abadiy
+        // yuklanadigan" o'lik oqim deb qabul qilinadi va tiklash zanjiri
+        // qo'lda ishga tushiriladi.
         private const val OPEN_TIMEOUT_MS = 12_000L
         private val timeFormat = SimpleDateFormat("HH:mm", Locale.US)
     }
