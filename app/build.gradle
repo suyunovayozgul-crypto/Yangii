@@ -13,6 +13,16 @@ android {
         targetSdk 36
         versionCode 1
         versionName "1.0"
+
+        // libvlc-all va boshqa native kutubxonalar (FFmpeg) 4 xil protsessor
+        // arxitekturasi uchun fayl qo'shadi: arm64-v8a, armeabi-v7a, x86, x86_64.
+        // Haqiqiy telefon va Smart TV pristavkalarning deyarli barchasi ARM
+        // protsessorli — x86/x86_64 esa faqat kompyuter emulyatorlari uchun
+        // kerak. Ularni olib tashlash APK hajmini sezilarli kamaytiradi va
+        // hech qanday real qurilmaga ta'sir qilmaydi.
+        ndk {
+            abiFilters "armeabi-v7a", "arm64-v8a"
+        }
     }
 
     buildTypes {

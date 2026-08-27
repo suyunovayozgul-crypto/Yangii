@@ -73,6 +73,18 @@ class PlayerActivity : AppCompatActivity() {
     private var retryCount: Int = 0
     private var hardRecoverAttempted = false
 
+    // === "Abadiy yuklanish" qo'riqchisi ===
+    // Ba'zi o'lik/geo-blok qilingan IPTV serverlar ulanishni na xato beradi,
+    // na yopadi — shunchaki hech narsa yubormay, cheksiz "buffering" holatida
+    // ushlab turadi. Bunday holatda ExoPlayer'ning onPlayerError() HECH QACHON
+    // chaqirilmaydi, shuning uchun pastdagi butun qayta urinish/VLC zanjiri
+    // ishga tushmay qoladi — aynan shu "qora ekran, abadiy yuklanadi" holatiga
+    // sabab bo'lgan joy. Yechim: prepare() chaqirilganda mustaqil taymer
+    // boshlaymiz; agar OPEN_TIMEOUT_MS ichida STATE_READY'ga yetmasa — buni
+    // xuddi xatolik kelgandek qabul qilib, xuddi shu tiklash zanjirini
+    // qo'lda ishga tushiramiz.
+    private var openWatchdogRunnable: Runnable? = null
+
     // === VLC (zaxira pleyer) holati ===
     // ExoPlayer bir necha marta urinib ham ochira olmagan kanal uchun,
     // xato ko'rsatishdan OLDIN, shu bitta kanalni VLC bilan sinab ko'ramiz.
@@ -335,11 +347,18 @@ class PlayerActivity : AppCompatActivity() {
                 handlePlaybackError()
             }
 
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_READY) {
+                    cancelOpenWatchdog()
+                }
+            }
+
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying) {
                     retryCount = 0
                     hardRecoverAttempted = false
                     hideStreamError()
+                    cancelOpenWatchdog()
                 }
                 updatePlayPauseIcon()
             }
@@ -409,15 +428,34 @@ class PlayerActivity : AppCompatActivity() {
                         retryCount = 0
                         hardRecoverAttempted = false
                         hideStreamError()
+                        cancelOpenWatchdog()
                     }
                 }
                 MediaPlayer.Event.EncounteredError -> {
                     // VLC ham ocholmadi — endi haqiqatan xato ko'rsatamiz.
-                    runOnUiThread { showStreamError(channel.name) }
+                    runOnUiThread {
+                        cancelOpenWatchdog()
+                        showStreamError(channel.name)
+                    }
                 }
             }
         }
         mp.play()
+
+        // VLC ham xato bermasdan "abadiy yuklanadigan" turdagi o'lik oqimga duch
+        // kelishi mumkin — shu yerda ham mustaqil taymer bilan sug'urtalaymiz.
+        // Bu bosqich zanjirning oxirgi qavati bo'lgani uchun, muddat o'tsa
+        // to'g'ridan-to'g'ri xato ko'rsatamiz (boshqa tiklash urinishisiz).
+        openWatchdogRunnable?.let { mainHandler.removeCallbacks(it) }
+        val vlcTimeoutRunnable = Runnable {
+            if (usingVlcFallback && currentChannel?.url == channel.url &&
+                vlcMediaPlayer?.isPlaying != true
+            ) {
+                showStreamError(channel.name)
+            }
+        }
+        openWatchdogRunnable = vlcTimeoutRunnable
+        mainHandler.postDelayed(vlcTimeoutRunnable, OPEN_TIMEOUT_MS)
     }
 
     /** Boshqa kanalga o'tishda yoki ExoPlayer'ga qaytishda VLC'ni tozalab qo'yamiz. */
@@ -488,6 +526,32 @@ class PlayerActivity : AppCompatActivity() {
         exoPlayer.setMediaSource(mediaSource)
         exoPlayer.prepare()
         exoPlayer.playWhenReady = true
+        scheduleOpenWatchdog(channel)
+    }
+
+    /**
+     * Agar OPEN_TIMEOUT_MS ichida shu kanal STATE_READY'ga yetmasa — bu
+     * "abadiy yuklanadigan" o'lik oqim degani. ExoPlayer o'zi xato bermasa ham,
+     * xuddi xatolik kelgandek qayta tiklash zanjirini (softRetry → hardRecover
+     * → VLC → xato ko'rsatish) qo'lda ishga tushiramiz.
+     */
+    private fun scheduleOpenWatchdog(channel: Channel) {
+        cancelOpenWatchdog()
+        val runnable = Runnable {
+            val exoPlayer = player
+            if (exoPlayer != null && currentChannel?.url == channel.url &&
+                exoPlayer.playbackState != Player.STATE_READY
+            ) {
+                handlePlaybackError()
+            }
+        }
+        openWatchdogRunnable = runnable
+        mainHandler.postDelayed(runnable, OPEN_TIMEOUT_MS)
+    }
+
+    private fun cancelOpenWatchdog() {
+        openWatchdogRunnable?.let { mainHandler.removeCallbacks(it) }
+        openWatchdogRunnable = null
     }
 
     private fun statusHint(text: String) {
@@ -1015,6 +1079,7 @@ class PlayerActivity : AppCompatActivity() {
     override fun onStop() {
         super.onStop()
         mainHandler.removeCallbacks(stallWatchdogRunnable)
+        cancelOpenWatchdog()
         player?.release()
         player = null
     }
@@ -1033,6 +1098,10 @@ class PlayerActivity : AppCompatActivity() {
         private const val OVERLAY_AUTO_HIDE_MS = 4_000L
         private const val STATS_REFRESH_MS = 2_000L
         private const val WATCHDOG_INTERVAL_MS = 8_000L
+        // Shu qadar vaqt ichida kanal ochilmasa (STATE_READY'ga yetmasa yoki
+        // VLC "Playing" bermasa) — "abadiy yuklanadigan" o'lik oqim deb qabul
+        // qilinadi va tiklash zanjiri qo'lda ishga tushiriladi.
+        private const val OPEN_TIMEOUT_MS = 12_000L
         private val timeFormat = SimpleDateFormat("HH:mm", Locale.US)
     }
 }
