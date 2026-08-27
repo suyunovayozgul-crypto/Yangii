@@ -1,0 +1,36 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kodni olish
+        uses: actions/checkout@v4
+
+      - name: JDK 17 o'rnatish
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Android SDK o'rnatish
+        uses: android-actions/setup-android@v3
+
+      - name: Gradle o'rnatish va ishga tushirish
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Debug APK yasash
+        run: gradle assembleDebug --stacktrace
+
+      - name: APK'ni saqlash (Actions natijasida yuklab olish uchun)
+        uses: actions/upload-artifact@v4
+        with:
+          name: SignalIPTV-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
