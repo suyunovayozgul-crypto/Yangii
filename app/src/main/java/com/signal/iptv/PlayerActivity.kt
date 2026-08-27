@@ -412,12 +412,23 @@ class PlayerActivity : AppCompatActivity() {
         vout.attachViews()
 
         val media = Media(libVLC, android.net.Uri.parse(channel.url))
-        // Ko'p IPTV serverlar User-Agent'siz so'rovni rad etadi — ExoPlayer'da
-        // ishlatilgan bilan bir xil sarlavhani beramiz.
+        // Ko'p IPTV serverlar User-Agent va Referer/Origin'siz so'rovni rad
+        // etadi (403) — ExoPlayer tomonida ishlatilgan bilan bir xil,
+        // kanalning o'z domenidan yasalgan Referer'ni shu yerga ham beramiz.
+        // network-caching/live-caching qiymatlari VLC'ning jonli oqimlarda
+        // ko'proq barqaror ishlashiga yordam beradi.
+        val referer = deriveReferer(channel)
         media.addOption(
             ":http-user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
                 "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         )
+        if (referer.isNotBlank()) {
+            media.addOption(":http-referrer=$referer")
+        }
+        media.addOption(":network-caching=1500")
+        media.addOption(":live-caching=1500")
+        media.addOption(":clock-jitter=0")
+        media.addOption(":clock-synchro=0")
         mp.media = media
         media.release()
 
@@ -507,16 +518,37 @@ class PlayerActivity : AppCompatActivity() {
      * aks holda o'sha kanal umuman ochilmaydi, garchi oqimning o'zi ishlab
      * turgan bo'lsa ham.
      */
+    /**
+     * Ko'p bepul IPTV serverlari (masalan oktv.uz kabi) so'rov Referer/Origin
+     * sarlavhalarisiz kelsa — 403 bilan rad etadi, garchi User-Agent to'g'ri
+     * bo'lsa ham. Playlist o'zi Referer ko'rsatmagan bo'lsa, kanalning O'Z
+     * domenidan (masalan https://ru.oktv.uz/) sun'iy Referer/Origin yasab
+     * yuboramiz — bu ko'plab "faqat brauzerdan kelayotganday" tekshiruvni
+     * chetlab o'tadi (Televizo va boshqa ilovalar ham aynan shunday qiladi).
+     */
+    private fun deriveReferer(channel: Channel): String {
+        if (channel.referrer.isNotBlank()) return channel.referrer
+        return try {
+            val uri = android.net.Uri.parse(channel.url)
+            "${uri.scheme}://${uri.host}/"
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
     private fun preparePlayback(channel: Channel) {
         val exoPlayer = player ?: return
         val userAgent = channel.userAgent.ifBlank { M3UParser.BROWSER_USER_AGENT }
+        val referer = deriveReferer(channel)
         val httpFactory = DefaultHttpDataSource.Factory()
             .setUserAgent(userAgent)
             .setConnectTimeoutMs(15000)
             .setReadTimeoutMs(15000)
             .setAllowCrossProtocolRedirects(true)
-        if (channel.referrer.isNotBlank()) {
-            httpFactory.setDefaultRequestProperties(mapOf("Referer" to channel.referrer))
+        if (referer.isNotBlank()) {
+            httpFactory.setDefaultRequestProperties(
+                mapOf("Referer" to referer, "Origin" to referer.trimEnd('/'))
+            )
         }
         val mediaSource = DefaultMediaSourceFactory(httpFactory)
             .createMediaSource(MediaItem.fromUri(channel.url))
