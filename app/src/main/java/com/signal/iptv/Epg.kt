@@ -42,13 +42,19 @@ object EpgRepository {
     @Volatile var isLoaded: Boolean = false
         private set
 
+    // Oxirgi urinish muvaffaqiyatsiz tugagan bo'lsa, keyingi ensureLoaded() chaqiruvi
+    // (masalan, foydalanuvchi playerni qayta ochganda) darhol qayta urinib ko'rishi kerak —
+    // aks holda EPG bir marta yuklanmasa, butun ilova umri davomida abadiy yo'qolib qoladi.
+    @Volatile private var lastAttemptFailed = false
+
     /**
      * Kicks off a background download+parse if not already loaded/loading.
      * [onLoaded] is called on the main thread once data is ready (immediately
      * if it already is). Safe to call multiple times (e.g. from every screen).
+     * Agar oldingi urinish xato bo'lsa, qayta yuklashga harakat qiladi.
      */
     fun ensureLoaded(url: String, onLoaded: (() -> Unit)? = null) {
-        if (isLoaded) {
+        if (isLoaded && !lastAttemptFailed) {
             onLoaded?.invoke()
             return
         }
@@ -61,10 +67,19 @@ object EpgRepository {
             val result = try {
                 fetchAndParse(url)
             } catch (e: Exception) {
-                emptyMap()
+                null
             }
-            programmesByChannel = result
-            isLoaded = true
+            if (result != null && result.isNotEmpty()) {
+                programmesByChannel = result
+                isLoaded = true
+                lastAttemptFailed = false
+            } else {
+                // Eski ma'lumot bo'lsa saqlanib qoladi (ekranda hech bo'lmasa eski EPG
+                // ko'rinib tursin), lekin keyingi safar qayta yuklab ko'rishga urinamiz.
+                lastAttemptFailed = true
+                isLoaded = programmesByChannel.isNotEmpty()
+            }
+            loading.set(false)
             mainHandler.post {
                 val callbacks = synchronized(pendingCallbacks) {
                     val copy = pendingCallbacks.toList()
@@ -72,6 +87,11 @@ object EpgRepository {
                     copy
                 }
                 callbacks.forEach { it.invoke() }
+            }
+            // Muvaffaqiyatsiz bo'lsa — bir muncha vaqtdan so'ng fonda avtomatik qayta urinamiz,
+            // foydalanuvchi ekranni qayta ochishini kutmasdan.
+            if (lastAttemptFailed) {
+                mainHandler.postDelayed({ ensureLoaded(url, null) }, RETRY_DELAY_MS)
             }
         }
     }
@@ -88,6 +108,15 @@ object EpgRepository {
         if (tvgId.isBlank()) return null
         val list = programmesByChannel[tvgId] ?: return null
         return list.firstOrNull { it.start >= now }
+    }
+
+    /**
+     * To'liq dastur jadvali: o'tgan, hozirgi va kelasi ko'rsatuvlar — faqat "hozir"
+     * emas, balki foydalanuvchi so'ragan "to'liq EPG" uchun. Vaqt bo'yicha saralangan.
+     */
+    fun fullSchedule(tvgId: String): List<Programme> {
+        if (tvgId.isBlank()) return emptyList()
+        return (programmesByChannel[tvgId] ?: emptyList()).sortedBy { it.start }
     }
 
     private fun fetchAndParse(url: String): Map<String, List<Programme>> {
@@ -158,6 +187,8 @@ object EpgRepository {
         }
         return map
     }
+
+    private const val RETRY_DELAY_MS = 45_000L
 
     private fun parseTime(raw: String?): Long {
         if (raw.isNullOrBlank()) return 0L

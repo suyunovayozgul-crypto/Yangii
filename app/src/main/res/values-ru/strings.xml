@@ -34,6 +34,18 @@
     <string name="resize_fill">ЗАПОЛНИТЬ</string>
 
     <string name="epg_now_prefix">Сейчас: %1$s</string>
+    <string name="epg_next_prefix">Далее: %1$s</string>
+
+    <string name="player_audio_button">Аудио язык</string>
+    <string name="player_epg_button">Программа передач</string>
+    <string name="audio_track_dialog_title">Выберите аудио язык</string>
+    <string name="audio_track_auto">Автоматически</string>
+    <string name="audio_track_unknown">Неизвестный язык</string>
+    <string name="audio_track_none">Для этого канала нет данных об аудиодорожках.</string>
+    <string name="epg_dialog_title">Программа передач — %1$s</string>
+    <string name="epg_no_data">Для этого канала пока нет данных EPG.</string>
+    <string name="epg_close">Закрыть</string>
+    <string name="stream_reconnecting">Восстановление соединения…</string>
 
     <string name="menu_settings">Настройки</string>
     <string name="settings_title">Настройки</string>

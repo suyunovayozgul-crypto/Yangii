@@ -34,6 +34,18 @@
     <string name="resize_fill">TO\'LDIRISH</string>
 
     <string name="epg_now_prefix">Hozir: %1$s</string>
+    <string name="epg_next_prefix">Keyingi: %1$s</string>
+
+    <string name="player_audio_button">Audio til</string>
+    <string name="player_epg_button">Dastur jadvali</string>
+    <string name="audio_track_dialog_title">Audio tilni tanlang</string>
+    <string name="audio_track_auto">Avtomatik</string>
+    <string name="audio_track_unknown">Noma\'lum til</string>
+    <string name="audio_track_none">Bu kanalda audio treklar haqida ma\'lumot yo\'q.</string>
+    <string name="epg_dialog_title">Dastur jadvali — %1$s</string>
+    <string name="epg_no_data">Bu kanal uchun dastur jadvali (EPG) hozircha mavjud emas.</string>
+    <string name="epg_close">Yopish</string>
+    <string name="stream_reconnecting">Ulanish tiklanmoqda…</string>
 
     <string name="menu_settings">Sozlamalar</string>
     <string name="settings_title">Sozlamalar</string>

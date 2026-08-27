@@ -18,29 +18,38 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.drawerlayout.widget.DrawerLayout
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.NextRenderersFactory
 import androidx.media3.exoplayer.DefaultRenderersFactory
+import java.text.SimpleDateFormat
+import java.util.Locale
 import java.util.concurrent.Executors
 import kotlin.math.abs
 
 class PlayerActivity : AppCompatActivity() {
 
     private var player: ExoPlayer? = null
+    private lateinit var trackSelector: DefaultTrackSelector
     private val executor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -50,8 +59,17 @@ class PlayerActivity : AppCompatActivity() {
     private var searchTerm = ""
 
     private var currentChannel: Channel? = null
+
+    // === Xatolikdan tiklanish holati ===
+    // Ko'p bepul IPTV oqimlari vaqti-vaqti bilan segment/ulanish xatoligi beradi.
+    // Avval yengil (soft) qayta urinish qilinadi — shunchaki qayta prepare().
+    // Bu yordam bermasa, ExoPlayer'ning o'zi butunlay yangidan yaratiladi
+    // (native dekoder holati "osilib qolgan" bo'lishi mumkin — xuddi ilovani
+    // to'liq qayta ishga tushirgandagi kabi yangi holatga o'tkazadi). Faqat shu
+    // ham yordam bermasa, foydalanuvchiga "Qayta urinish" tugmasi ko'rsatiladi.
     private var retryCount: Int = 0
-    private val maxRetries: Int = 2
+    private var hardRecoverAttempted = false
+    private val maxSoftRetries: Int = 2
 
     // Ekran to'ldirish rejimlari orasida aylanish (kichik/katta ekran).
     private val resizeModes = intArrayOf(
@@ -67,6 +85,10 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var overlayGroup: View
     private lateinit var titleView: TextView
     private lateinit var programView: TextView
+    private lateinit var nextProgramView: TextView
+    private lateinit var statsView: TextView
+    private lateinit var streamErrorView: TextView
+    private lateinit var retryBtn: Button
     private lateinit var resizeLabel: TextView
     private lateinit var tabsRow: LinearLayout
     private lateinit var searchBox: EditText
@@ -83,15 +105,23 @@ class PlayerActivity : AppCompatActivity() {
         }
     }
 
+    // Ekranda ko'rsatiladigan texnik ma'lumot: o'lcham, fps, audio tili —
+    // foydalanuvchi "necha fps, qanaqa kanal qaysi tilida ketyapti" deb so'ragan edi.
+    private val statsRunnable = object : Runnable {
+        override fun run() {
+            updateStatsLabel()
+            mainHandler.postDelayed(this, STATS_REFRESH_MS)
+        }
+    }
+
     private val hideResizeLabelRunnable = Runnable {
         resizeLabel.animate().alpha(0f).setDuration(200).withEndAction {
             resizeLabel.visibility = View.GONE
         }.start()
     }
 
-    // Overlay (tepadagi panel + o'ng tomondagi tugmalar) bir marta bosilganda
-    // ko'rinadi/yashiriladi, va harakatsiz qolsa o'zi avtomatik yashiriladi —
-    // shu bilan videoning to'liq ekranda "qora panel yopishib qolgan" holati tuzatiladi.
+    // Overlay (tepadagi panel + pastdagi panel + o'ng tomondagi tugmalar) bir marta
+    // bosilganda ko'rinadi/yashiriladi, va harakatsiz qolsa o'zi avtomatik yashiriladi.
     private var overlayVisible = true
     private val hideOverlayRunnable = Runnable { setOverlayVisible(false) }
 
@@ -109,6 +139,10 @@ class PlayerActivity : AppCompatActivity() {
         overlayGroup = findViewById(R.id.overlayGroup)
         titleView = findViewById(R.id.playerTitle)
         programView = findViewById(R.id.playerProgram)
+        nextProgramView = findViewById(R.id.playerNextProgram)
+        statsView = findViewById(R.id.playerStats)
+        streamErrorView = findViewById(R.id.playerStreamError)
+        retryBtn = findViewById(R.id.playerRetryBtn)
         resizeLabel = findViewById(R.id.playerResizeLabel)
         tabsRow = findViewById(R.id.playerTabsRow)
         searchBox = findViewById(R.id.playerSearchBox)
@@ -131,6 +165,14 @@ class PlayerActivity : AppCompatActivity() {
             toggleOrientation()
             keepOverlayVisible()
         }
+        findViewById<ImageButton>(R.id.playerAudioBtn).setOnClickListener {
+            showAudioTrackDialog()
+            keepOverlayVisible()
+        }
+        findViewById<ImageButton>(R.id.playerEpgBtn).setOnClickListener {
+            showEpgDialog()
+            keepOverlayVisible()
+        }
         findViewById<ImageButton>(R.id.playerChannelUpBtn).setOnClickListener {
             switchChannel(1)
             keepOverlayVisible()
@@ -141,6 +183,10 @@ class PlayerActivity : AppCompatActivity() {
         }
         playPauseBtn.setOnClickListener {
             togglePlayPause()
+            keepOverlayVisible()
+        }
+        retryBtn.setOnClickListener {
+            hardRecover()
             keepOverlayVisible()
         }
 
@@ -171,6 +217,7 @@ class PlayerActivity : AppCompatActivity() {
             adapter.refreshEpgRows()
         }
         mainHandler.postDelayed(epgRefreshRunnable, EPG_LABEL_REFRESH_MS)
+        mainHandler.postDelayed(statsRunnable, STATS_REFRESH_MS)
     }
 
     private fun setupPlayer() {
@@ -210,8 +257,11 @@ class PlayerActivity : AppCompatActivity() {
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
+        trackSelector = DefaultTrackSelector(this)
+
         val exoPlayer = ExoPlayer.Builder(this, renderersFactory)
             .setMediaSourceFactory(mediaSourceFactory)
+            .setTrackSelector(trackSelector)
             .setLoadControl(loadControl)
             .build()
         player = exoPlayer
@@ -219,20 +269,95 @@ class PlayerActivity : AppCompatActivity() {
         playerView.resizeMode = resizeModes[resizeModeIndex]
         exoPlayer.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
-                if (retryCount < maxRetries) {
-                    retryCount++
-                    mainHandler.postDelayed({ currentChannel?.let { playChannel(it) } }, 1500)
-                } else {
-                    val name = currentChannel?.name ?: ""
-                    titleView.text = getString(R.string.stream_error, name)
-                }
+                handlePlaybackError()
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                if (isPlaying) retryCount = 0
+                if (isPlaying) {
+                    retryCount = 0
+                    hardRecoverAttempted = false
+                    hideStreamError()
+                }
                 updatePlayPauseIcon()
             }
         })
+    }
+
+    /**
+     * Oqim xatoligini bosqichma-bosqich tiklash: avval bir necha yengil qayta
+     * urinish (tezroq va arzonroq), so'ng playerni to'liq qayta yaratish
+     * (og'irroq, lekin "osilib qolgan" holatlarni tuzatadi), va faqat shu ham
+     * yordam bermasa — foydalanuvchiga "Qayta urinish" tugmasini ko'rsatish.
+     */
+    private fun handlePlaybackError() {
+        val channel = currentChannel ?: return
+        if (retryCount < maxSoftRetries) {
+            retryCount++
+            statusHint(getString(R.string.stream_reconnecting))
+            mainHandler.postDelayed({ softRetry() }, 1500L * retryCount)
+        } else if (!hardRecoverAttempted) {
+            hardRecoverAttempted = true
+            statusHint(getString(R.string.stream_reconnecting))
+            mainHandler.postDelayed({ hardRecoverSilently() }, 1500L)
+        } else {
+            showStreamError(channel.name)
+        }
+    }
+
+    private fun softRetry() {
+        val channel = currentChannel ?: return
+        val exoPlayer = player ?: return
+        exoPlayer.stop()
+        exoPlayer.clearMediaItems()
+        exoPlayer.setMediaItem(MediaItem.fromUri(channel.url))
+        exoPlayer.prepare()
+        exoPlayer.playWhenReady = true
+    }
+
+    /** Avtomatik, foydalanuvchiga ko'rinmaydigan to'liq playerni qayta yaratish. */
+    private fun hardRecoverSilently() {
+        player?.release()
+        setupPlayer()
+        retryCount = 0
+        val channel = currentChannel ?: return
+        val exoPlayer = player ?: return
+        exoPlayer.setMediaItem(MediaItem.fromUri(channel.url))
+        exoPlayer.prepare()
+        exoPlayer.playWhenReady = true
+        updatePlayPauseIcon()
+    }
+
+    /** Foydalanuvchi "Qayta urinish" tugmasini bosganda chaqiriladi. */
+    private fun hardRecover() {
+        hideStreamError()
+        retryCount = 0
+        hardRecoverAttempted = false
+        player?.release()
+        setupPlayer()
+        val channel = currentChannel ?: return
+        val exoPlayer = player ?: return
+        exoPlayer.setMediaItem(MediaItem.fromUri(channel.url))
+        exoPlayer.prepare()
+        exoPlayer.playWhenReady = true
+        updatePlayPauseIcon()
+    }
+
+    private fun statusHint(text: String) {
+        streamErrorView.visibility = View.VISIBLE
+        streamErrorView.text = text
+        retryBtn.visibility = View.GONE
+    }
+
+    private fun showStreamError(channelName: String) {
+        streamErrorView.visibility = View.VISIBLE
+        streamErrorView.text = getString(R.string.stream_error, channelName)
+        retryBtn.visibility = View.VISIBLE
+        keepOverlayVisible()
+    }
+
+    private fun hideStreamError() {
+        streamErrorView.visibility = View.GONE
+        retryBtn.visibility = View.GONE
     }
 
     /**
@@ -394,9 +519,18 @@ class PlayerActivity : AppCompatActivity() {
     private fun playChannel(channel: Channel) {
         currentChannel = channel
         retryCount = 0
+        hardRecoverAttempted = false
+        hideStreamError()
         titleView.text = channel.name
         updateProgramLabel()
+        statsView.visibility = View.GONE
         val exoPlayer = player ?: return
+        // Eski oqimni to'liq to'xtatib, media ro'yxatini tozalab, keyin yangisini
+        // qo'yamiz — shunda avvalgi kanalning dekoder holati keyingi kanalga
+        // "yopishib qolmaydi" (aynan shu, ba'zi kanal ishlab turib to'satdan
+        // ishlamay qolishining asosiy sababi edi).
+        exoPlayer.stop()
+        exoPlayer.clearMediaItems()
         exoPlayer.setMediaItem(MediaItem.fromUri(channel.url))
         exoPlayer.prepare()
         exoPlayer.playWhenReady = true
@@ -413,6 +547,129 @@ class PlayerActivity : AppCompatActivity() {
         } else {
             programView.visibility = View.GONE
         }
+
+        val next = EpgRepository.nextProgramme(channel.tvgId)
+        if (next != null && next.title.isNotBlank()) {
+            nextProgramView.visibility = View.VISIBLE
+            val time = timeFormat.format(java.util.Date(next.start))
+            nextProgramView.text = getString(R.string.epg_next_prefix, "$time — ${next.title}")
+        } else {
+            nextProgramView.visibility = View.GONE
+        }
+    }
+
+    /** Ekranda o'lcham, fps va joriy audio tilini ko'rsatadi. */
+    private fun updateStatsLabel() {
+        val exoPlayer = player
+        if (exoPlayer == null) {
+            statsView.visibility = View.GONE
+            return
+        }
+        val video = exoPlayer.videoFormat
+        val audio = exoPlayer.audioFormat
+        val parts = mutableListOf<String>()
+        if (video != null && video.width > 0 && video.height > 0) {
+            parts.add("${video.width}×${video.height}")
+            if (video.frameRate > 0f) {
+                parts.add("${Math.round(video.frameRate)}fps")
+            }
+        }
+        if (audio != null) {
+            val lang = audio.language?.uppercase(Locale.US)
+            if (!lang.isNullOrBlank()) parts.add(lang)
+        }
+        if (parts.isEmpty()) {
+            statsView.visibility = View.GONE
+        } else {
+            statsView.visibility = View.VISIBLE
+            statsView.text = parts.joinToString("  ·  ")
+        }
+    }
+
+    /** Joriy kanalning mavjud audio treklari (tillari) orasidan tanlash oynasi. */
+    private fun showAudioTrackDialog() {
+        val exoPlayer = player ?: return
+        val audioGroups = exoPlayer.currentTracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
+        if (audioGroups.isEmpty()) {
+            Toast.makeText(this, R.string.audio_track_none, Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val labels = mutableListOf(getString(R.string.audio_track_auto))
+        val entries = mutableListOf<Pair<androidx.media3.common.Tracks.Group, Int>?>(null)
+        audioGroups.forEach { group ->
+            for (i in 0 until group.length) {
+                val format = group.getTrackFormat(i)
+                val lang = format.language?.uppercase(Locale.US)
+                val label = format.label ?: lang ?: getString(R.string.audio_track_unknown)
+                labels.add(label)
+                entries.add(group to i)
+            }
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle(R.string.audio_track_dialog_title)
+            .setItems(labels.toTypedArray()) { dialog, which ->
+                val entry = entries[which]
+                trackSelector.parameters = if (entry == null) {
+                    trackSelector.parameters.buildUpon()
+                        .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+                        .build()
+                } else {
+                    val (group, index) = entry
+                    trackSelector.parameters.buildUpon()
+                        .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, index))
+                        .build()
+                }
+                dialog.dismiss()
+            }
+            .show()
+    }
+
+    /**
+     * Joriy kanalning to'liq dastur jadvali — faqat "hozir" emas, balki
+     * o'tgan va kelasi ko'rsatuvlar ham. Foydalanuvchi aynan shuni so'ragan edi.
+     */
+    private fun showEpgDialog() {
+        val channel = currentChannel ?: return
+        val schedule = EpgRepository.fullSchedule(channel.tvgId)
+
+        val container = LinearLayout(this)
+        container.orientation = LinearLayout.VERTICAL
+        val pad = (16 * resources.displayMetrics.density).toInt()
+        container.setPadding(pad, pad, pad, pad)
+
+        if (schedule.isEmpty()) {
+            val empty = TextView(this)
+            empty.text = getString(R.string.epg_no_data)
+            empty.setTextColor(ContextCompat.getColor(this, R.color.muted))
+            empty.textSize = 13f
+            container.addView(empty)
+        } else {
+            val now = System.currentTimeMillis()
+            schedule.forEach { programme ->
+                val isNow = now in programme.start until programme.stop
+                val row = TextView(this)
+                val time = timeFormat.format(java.util.Date(programme.start))
+                row.text = "$time   ${programme.title}"
+                row.setPadding(0, pad / 2, 0, pad / 2)
+                row.textSize = 13f
+                row.setTextColor(
+                    ContextCompat.getColor(this, if (isNow) R.color.amber else R.color.text)
+                )
+                row.setTypeface(row.typeface, if (isNow) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
+                container.addView(row)
+            }
+        }
+
+        val scroll = ScrollView(this)
+        scroll.addView(container)
+
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.epg_dialog_title, channel.name))
+            .setView(scroll)
+            .setPositiveButton(R.string.epg_close) { dialog, _ -> dialog.dismiss() }
+            .show()
     }
 
     private fun loadChannelsForDrawer() {
@@ -535,6 +792,27 @@ class PlayerActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * MUHIM: onStop() playerni to'liq bo'shatadi (quyida), lekin oldin bu playerni
+     * qayta tiklaydigan hech narsa yo'q edi — shuning uchun ilova fonga ketib
+     * qaytganda (ekran o'chib-yonganda, boshqa ilova ustiga chiqib qaytganda va h.k.)
+     * video hech qachon qayta boshlanmas edi, va faqat ilovani butunlay yopib qayta
+     * ochish yordam berardi. Endi onStart() playerni yo'q bo'lsa qayta yaratadi va
+     * joriy kanalni qayta ishga tushiradi.
+     */
+    override fun onStart() {
+        super.onStart()
+        if (player == null) {
+            setupPlayer()
+            currentChannel?.let { channel ->
+                player?.setMediaItem(MediaItem.fromUri(channel.url))
+                player?.prepare()
+                player?.playWhenReady = true
+                updatePlayPauseIcon()
+            }
+        }
+    }
+
     override fun onStop() {
         super.onStop()
         player?.release()
@@ -550,5 +828,7 @@ class PlayerActivity : AppCompatActivity() {
         private const val SWIPE_MIN_DISTANCE_PX = 120
         private const val EPG_LABEL_REFRESH_MS = 30_000L
         private const val OVERLAY_AUTO_HIDE_MS = 4_000L
+        private const val STATS_REFRESH_MS = 2_000L
+        private val timeFormat = SimpleDateFormat("HH:mm", Locale.US)
     }
 }

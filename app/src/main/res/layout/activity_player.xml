@@ -31,6 +31,7 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent">
 
+            <!-- Yuqori panel: faqat boshqaruv tugmalari, kanal nomi endi pastda -->
             <LinearLayout
                 android:id="@+id/playerTopBar"
                 android:layout_width="match_parent"
@@ -52,38 +53,33 @@
                     android:src="@drawable/ic_back"
                     android:contentDescription="@string/player_back_button" />
 
-                <LinearLayout
+                <View
                     android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:layout_marginStart="10dp"
-                    android:orientation="vertical">
+                    android:layout_height="1dp"
+                    android:layout_weight="1" />
 
-                    <TextView
-                        android:id="@+id/playerTitle"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:textColor="@color/amber"
-                        android:textSize="15sp"
-                        android:textStyle="bold"
-                        android:maxLines="1"
-                        android:ellipsize="end" />
+                <ImageButton
+                    android:id="@+id/playerAudioBtn"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:background="@drawable/bg_control_circle_focus"
+                    android:src="@drawable/ic_audio"
+                    android:contentDescription="@string/player_audio_button" />
 
-                    <TextView
-                        android:id="@+id/playerProgram"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:textColor="@color/cyan"
-                        android:textSize="12sp"
-                        android:maxLines="1"
-                        android:ellipsize="end"
-                        android:visibility="gone" />
-                </LinearLayout>
+                <ImageButton
+                    android:id="@+id/playerEpgBtn"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:layout_marginStart="4dp"
+                    android:background="@drawable/bg_control_circle_focus"
+                    android:src="@drawable/ic_epg"
+                    android:contentDescription="@string/player_epg_button" />
 
                 <ImageButton
                     android:id="@+id/playerRotateBtn"
                     android:layout_width="44dp"
                     android:layout_height="44dp"
+                    android:layout_marginStart="4dp"
                     android:background="@drawable/bg_control_circle_focus"
                     android:src="@drawable/ic_rotate"
                     android:contentDescription="@string/player_rotate_button" />
@@ -142,6 +138,109 @@
                     android:background="@drawable/bg_control_circle_focus"
                     android:src="@drawable/ic_chevron_down"
                     android:contentDescription="@string/player_channel_down_button" />
+            </LinearLayout>
+
+            <!-- Pastki panel: kanal nomi, "hozir"/"keyingi" dastur va texnik
+                 ma'lumot (o'lcham, fps, audio tili) shu yerda, chiroyli qilib
+                 pastga joylashtirilgan. -->
+            <LinearLayout
+                android:id="@+id/playerBottomBar"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_gravity="bottom"
+                android:orientation="vertical"
+                android:background="@drawable/gradient_bottom_bar"
+                android:paddingStart="18dp"
+                android:paddingEnd="18dp"
+                android:paddingTop="24dp"
+                android:paddingBottom="14dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <View
+                        android:id="@+id/playerLiveDot"
+                        android:layout_width="9dp"
+                        android:layout_height="9dp"
+                        android:background="@drawable/dot_live" />
+
+                    <TextView
+                        android:id="@+id/playerTitle"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginStart="8dp"
+                        android:textColor="@color/amber"
+                        android:textSize="17sp"
+                        android:textStyle="bold"
+                        android:maxLines="1"
+                        android:ellipsize="end" />
+
+                    <TextView
+                        android:id="@+id/playerStats"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="10dp"
+                        android:fontFamily="monospace"
+                        android:textColor="@color/muted"
+                        android:textSize="11sp"
+                        android:visibility="gone" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/playerProgram"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textColor="@color/cyan"
+                    android:textSize="13sp"
+                    android:maxLines="1"
+                    android:ellipsize="end"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/playerNextProgram"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:textColor="@color/muted"
+                    android:textSize="11sp"
+                    android:maxLines="1"
+                    android:ellipsize="end"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/playerStreamError"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:textColor="@color/live"
+                    android:textSize="12sp"
+                    android:visibility="gone" />
+
+                <Button
+                    android:id="@+id/playerRetryBtn"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:layout_gravity="start"
+                    android:background="@drawable/bg_retry_button"
+                    android:drawableStart="@drawable/ic_retry"
+                    android:drawablePadding="8dp"
+                    android:paddingStart="18dp"
+                    android:paddingEnd="18dp"
+                    android:paddingTop="9dp"
+                    android:paddingBottom="9dp"
+                    android:text="@string/retry"
+                    android:textAllCaps="false"
+                    android:textColor="@color/bg"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:stateListAnimator="null"
+                    android:visibility="gone" />
             </LinearLayout>
 
         </FrameLayout>
