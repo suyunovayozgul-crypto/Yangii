@@ -29,6 +29,13 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Bog'liqliklarni yuklab olish (NextLib tekshiruvi uchun)
+        run: gradle :app:dependencies --configuration debugRuntimeClasspath || true
+
+      - name: NextLib kutubxonasi ichini ko'rish (vaqtinchalik)
+        run: |
+          find ~/.gradle -name "nextlib-media3ext*.jar" -exec unzip -l {} \; | grep -i "class$" | grep -i "renderer"
+
       - name: Debug APK yasash
         run: gradle assembleDebug --stacktrace
 
