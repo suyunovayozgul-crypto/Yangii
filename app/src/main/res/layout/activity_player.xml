@@ -239,7 +239,6 @@
                     android:textColor="@color/bg"
                     android:textSize="13sp"
                     android:textStyle="bold"
-                    android:stateListAnimator="null"
                     android:visibility="gone" />
             </LinearLayout>
 

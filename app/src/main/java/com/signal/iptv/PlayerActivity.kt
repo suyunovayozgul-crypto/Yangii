@@ -143,6 +143,7 @@ class PlayerActivity : AppCompatActivity() {
         statsView = findViewById(R.id.playerStats)
         streamErrorView = findViewById(R.id.playerStreamError)
         retryBtn = findViewById(R.id.playerRetryBtn)
+        retryBtn.stateListAnimator = null
         resizeLabel = findViewById(R.id.playerResizeLabel)
         tabsRow = findViewById(R.id.playerTabsRow)
         searchBox = findViewById(R.id.playerSearchBox)
