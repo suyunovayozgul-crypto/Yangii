@@ -131,6 +131,9 @@ class MainActivity : AppCompatActivity() {
         }, EPG_ROW_REFRESH_MS)
     }
 
+    private var fetchRetryCount = 0
+    private val fetchRetryDelaysMs = longArrayOf(2000, 4000, 8000, 15000, 30000)
+
     private fun fetchPlaylist() {
         statusText.visibility = View.VISIBLE
         statusText.text = getString(R.string.loading)
@@ -139,20 +142,48 @@ class MainActivity : AppCompatActivity() {
         executor.execute {
             try {
                 val channels = M3UParser.fetch(PLAYLIST_URL)
-                mainHandler.post { onLoaded(channels) }
-            } catch (e: Exception) {
                 mainHandler.post {
-                    swipeRefresh.isRefreshing = false
-                    statusText.visibility = View.VISIBLE
-                    recyclerView.visibility = View.GONE
-                    statusText.text = getString(R.string.load_error, e.message ?: "")
+                    fetchRetryCount = 0
+                    onLoaded(channels)
                 }
+            } catch (e: Exception) {
+                mainHandler.post { onFetchFailed(e) }
             }
+        }
+    }
+
+    /**
+     * MUHIM: avval bitta urinish muvaffaqiyatsiz bo'lsa, kanallar ro'yxati
+     * abadiy bo'sh qolar edi ("kanallar ko'rinmay qoldi" holati aynan shundan
+     * kelib chiqqan) — endi internet birozgina qoqilib qolsa ham, ilova bir
+     * necha marta, ortib boruvchi kutish bilan, o'zi qayta urinadi.
+     */
+    private fun onFetchFailed(e: Exception) {
+        swipeRefresh.isRefreshing = false
+        if (fetchRetryCount < fetchRetryDelaysMs.size) {
+            val delay = fetchRetryDelaysMs[fetchRetryCount]
+            fetchRetryCount++
+            statusText.visibility = View.VISIBLE
+            recyclerView.visibility = View.GONE
+            statusText.text = getString(R.string.loading)
+            mainHandler.postDelayed({ fetchPlaylist() }, delay)
+        } else {
+            statusText.visibility = View.VISIBLE
+            recyclerView.visibility = View.GONE
+            statusText.text = getString(R.string.load_error, e.message ?: "")
         }
     }
 
     private fun onLoaded(channels: List<Channel>) {
         swipeRefresh.isRefreshing = false
+        // Agar server internet uzilishi sabab to'liqsiz (juda qisqa) ro'yxat
+        // yuborsa — buni haqiqiy yangilanish deb qabul qilmaymiz, chunki bu
+        // "kanallar birdan yo'qolib qoladi" holatining aynan o'zi. Eskisini
+        // saqlab qolamiz va qayta urinamiz.
+        if (allChannels.isNotEmpty() && channels.size < allChannels.size / 2) {
+            onFetchFailed(Exception("Incomplete playlist (${channels.size}/${allChannels.size})"))
+            return
+        }
         allChannels = channels
         categories = channels.map { it.group.trim() }
             .filter { it.isNotEmpty() }
@@ -272,6 +303,14 @@ class MainActivity : AppCompatActivity() {
             drawerLayout.closeDrawers()
         } else {
             super.onBackPressed()
+        }
+    }
+
+    /** Ilova fonga ketib qaytganda ro'yxat bo'sh qolib ketgan bo'lsa — qayta yuklaymiz. */
+    override fun onResume() {
+        super.onResume()
+        if (allChannels.isEmpty() && fetchRetryCount == 0) {
+            fetchPlaylist()
         }
     }
 

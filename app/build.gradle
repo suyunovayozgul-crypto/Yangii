@@ -62,4 +62,9 @@ dependencies {
 
     // Channel logos
     implementation 'com.github.bumptech.glide:glide:4.16.0'
+
+    // ZAXIRA (fallback) pleyer — ExoPlayer ochira olmagan "nostandart"
+    // kanallar uchun. VLC ichida o'zining ffmpeg-ga o'xshash dekoder
+    // to'plami bor va deyarli har qanday oqim formatini o'qiy oladi.
+    implementation 'org.videolan.android:libvlc-all:3.6.0'
 }

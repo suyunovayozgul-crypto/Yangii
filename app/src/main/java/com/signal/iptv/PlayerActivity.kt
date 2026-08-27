@@ -40,6 +40,10 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.NextRenderersFactory
 import androidx.media3.exoplayer.DefaultRenderersFactory
+import android.view.SurfaceView
+import org.videolan.libvlc.LibVLC
+import org.videolan.libvlc.Media
+import org.videolan.libvlc.MediaPlayer
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.concurrent.Executors
@@ -68,6 +72,13 @@ class PlayerActivity : AppCompatActivity() {
     // ham yordam bermasa, foydalanuvchiga "Qayta urinish" tugmasi ko'rsatiladi.
     private var retryCount: Int = 0
     private var hardRecoverAttempted = false
+
+    // === VLC (zaxira pleyer) holati ===
+    // ExoPlayer bir necha marta urinib ham ochira olmagan kanal uchun,
+    // xato ko'rsatishdan OLDIN, shu bitta kanalni VLC bilan sinab ko'ramiz.
+    private var libVLC: LibVLC? = null
+    private var vlcMediaPlayer: MediaPlayer? = null
+    private var usingVlcFallback = false
     private val maxSoftRetries: Int = 2
 
     // Ekran to'ldirish rejimlari orasida aylanish (kichik/katta ekran).
@@ -81,6 +92,7 @@ class PlayerActivity : AppCompatActivity() {
 
     private lateinit var channelsOverlay: View
     private lateinit var playerView: PlayerView
+    private lateinit var vlcSurface: SurfaceView
     private lateinit var overlayGroup: View
     private lateinit var titleView: TextView
     private lateinit var programView: TextView
@@ -110,6 +122,36 @@ class PlayerActivity : AppCompatActivity() {
         override fun run() {
             updateStatsLabel()
             mainHandler.postDelayed(this, STATS_REFRESH_MS)
+        }
+    }
+
+    // "Muzlab qolish" qo'riqchisi: ba'zi bepul IPTV serverlari oqimni jim
+    // to'xtatib qo'yadi — ExoPlayer xato bermaydi, shunchaki pozitsiya
+    // ilgarilamay qoladi. Shu tekshiruv har WATCHDOG_INTERVAL_MS'da bir marta
+    // pozitsiyani solishtiradi; agar ijro davom etayotgan bo'lsa-yu, pozitsiya
+    // qotib qolgan bo'lsa — kanalni jimgina qayta yuklaydi.
+    private var lastWatchdogPosition = -1L
+    private var lastWatchdogUnchangedCount = 0
+    private val stallWatchdogRunnable = object : Runnable {
+        override fun run() {
+            val exoPlayer = player
+            val channel = currentChannel
+            if (exoPlayer != null && channel != null && exoPlayer.playWhenReady &&
+                exoPlayer.playbackState != Player.STATE_IDLE
+            ) {
+                val position = exoPlayer.currentPosition
+                if (position == lastWatchdogPosition) {
+                    lastWatchdogUnchangedCount++
+                    if (lastWatchdogUnchangedCount >= 2) {
+                        lastWatchdogUnchangedCount = 0
+                        preparePlayback(channel)
+                    }
+                } else {
+                    lastWatchdogUnchangedCount = 0
+                }
+                lastWatchdogPosition = position
+            }
+            mainHandler.postDelayed(this, WATCHDOG_INTERVAL_MS)
         }
     }
 
@@ -145,8 +187,14 @@ class PlayerActivity : AppCompatActivity() {
             referrer = intent.getStringExtra("channel_referrer") ?: ""
         )
 
+        // MUHIM: ekran bir necha daqiqadan keyin o'zi o'chib/qulflanib qolsa,
+        // video to'xtab, "barcha kanallar ishlamay qoldi" holatiga olib kelardi.
+        // Shu bayroq bilan bu ekranda turgan vaqtda ekran hech qachon o'chmaydi.
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
         channelsOverlay = findViewById(R.id.channelsOverlay)
         playerView = findViewById(R.id.playerView)
+        vlcSurface = findViewById(R.id.vlcSurface)
         overlayGroup = findViewById(R.id.overlayGroup)
         titleView = findViewById(R.id.playerTitle)
         programView = findViewById(R.id.playerProgram)
@@ -314,9 +362,74 @@ class PlayerActivity : AppCompatActivity() {
             hardRecoverAttempted = true
             statusHint(getString(R.string.stream_reconnecting))
             mainHandler.postDelayed({ hardRecoverSilently() }, 1500L)
+        } else if (!usingVlcFallback) {
+            // ExoPlayer bir necha marta urinib ham ocholmadi — bu ko'pincha
+            // "nostandart" oqim formati degani. Xato ko'rsatishdan oldin,
+            // aynan shu bitta kanal uchun VLC'ga o'tib, so'nggi marta
+            // urinib ko'ramiz — VLC deyarli hammasini o'qiydi.
+            statusHint(getString(R.string.stream_reconnecting))
+            tryVlcFallback(channel)
         } else {
             showStreamError(channel.name)
         }
+    }
+
+    /** ExoPlayer ocholmagan kanal uchun — shu bitta kanalga VLC'ni sinab ko'ramiz. */
+    private fun tryVlcFallback(channel: Channel) {
+        usingVlcFallback = true
+        player?.pause()
+        playerView.visibility = View.GONE
+        vlcSurface.visibility = View.VISIBLE
+
+        if (libVLC == null) {
+            libVLC = LibVLC(this, arrayListOf("--no-drop-late-frames", "--no-skip-frames"))
+        }
+        vlcMediaPlayer?.release()
+        val mp = MediaPlayer(libVLC)
+        vlcMediaPlayer = mp
+
+        val vout = mp.vlcVout
+        vout.setVideoView(vlcSurface)
+        vout.attachViews()
+
+        val media = Media(libVLC, android.net.Uri.parse(channel.url))
+        // Ko'p IPTV serverlar User-Agent'siz so'rovni rad etadi — ExoPlayer'da
+        // ishlatilgan bilan bir xil sarlavhani beramiz.
+        media.addOption(
+            ":http-user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        )
+        mp.media = media
+        media.release()
+
+        mp.setEventListener { event ->
+            when (event.type) {
+                MediaPlayer.Event.Playing -> {
+                    runOnUiThread {
+                        retryCount = 0
+                        hardRecoverAttempted = false
+                        hideStreamError()
+                    }
+                }
+                MediaPlayer.Event.EncounteredError -> {
+                    // VLC ham ocholmadi — endi haqiqatan xato ko'rsatamiz.
+                    runOnUiThread { showStreamError(channel.name) }
+                }
+            }
+        }
+        mp.play()
+    }
+
+    /** Boshqa kanalga o'tishda yoki ExoPlayer'ga qaytishda VLC'ni tozalab qo'yamiz. */
+    private fun releaseVlcFallback() {
+        if (!usingVlcFallback) return
+        usingVlcFallback = false
+        vlcMediaPlayer?.stop()
+        vlcMediaPlayer?.vlcVout?.detachViews()
+        vlcMediaPlayer?.release()
+        vlcMediaPlayer = null
+        vlcSurface.visibility = View.GONE
+        playerView.visibility = View.VISIBLE
     }
 
     private fun softRetry() {
@@ -564,6 +677,7 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     private fun playChannel(channel: Channel) {
+        releaseVlcFallback()
         currentChannel = channel
         retryCount = 0
         hardRecoverAttempted = false
@@ -649,7 +763,7 @@ class PlayerActivity : AppCompatActivity() {
             }
         }
 
-        AlertDialog.Builder(this)
+        AlertDialog.Builder(this, R.style.SignalDialogTheme)
             .setTitle(R.string.audio_track_dialog_title)
             .setItems(labels.toTypedArray()) { dialog, which ->
                 val entry = entries[which]
@@ -707,28 +821,51 @@ class PlayerActivity : AppCompatActivity() {
         val scroll = ScrollView(this)
         scroll.addView(container)
 
-        AlertDialog.Builder(this)
+        AlertDialog.Builder(this, R.style.SignalDialogTheme)
             .setTitle(getString(R.string.epg_dialog_title, channel.name))
             .setView(scroll)
             .setPositiveButton(R.string.epg_close) { dialog, _ -> dialog.dismiss() }
             .show()
     }
 
+    private var drawerFetchRetryCount = 0
+    private val drawerFetchRetryDelaysMs = longArrayOf(2000, 4000, 8000, 15000, 30000)
+
+    /** MUHIM: avval bitta urinish yetarli emas edi — internet birozgina qoqilib
+     * qolsa, kanal ro'yxati (drawer) abadiy bo'sh qolar edi. Endi bir necha marta
+     * qayta urinadi. */
     private fun loadChannelsForDrawer() {
         executor.execute {
             try {
                 val channels = M3UParser.fetch(MainActivity.PLAYLIST_URL)
-                mainHandler.post { onChannelsLoaded(channels) }
+                mainHandler.post {
+                    drawerFetchRetryCount = 0
+                    onChannelsLoaded(channels)
+                }
             } catch (e: Exception) {
                 mainHandler.post {
-                    statusText.visibility = View.VISIBLE
-                    statusText.text = getString(R.string.load_error, e.message ?: "")
+                    if (drawerFetchRetryCount < drawerFetchRetryDelaysMs.size) {
+                        val delay = drawerFetchRetryDelaysMs[drawerFetchRetryCount]
+                        drawerFetchRetryCount++
+                        mainHandler.postDelayed({ loadChannelsForDrawer() }, delay)
+                    } else {
+                        statusText.visibility = View.VISIBLE
+                        statusText.text = getString(R.string.load_error, e.message ?: "")
+                    }
                 }
             }
         }
     }
 
     private fun onChannelsLoaded(channels: List<Channel>) {
+        if (allChannels.isNotEmpty() && channels.size < allChannels.size / 2) {
+            if (drawerFetchRetryCount < drawerFetchRetryDelaysMs.size) {
+                val delay = drawerFetchRetryDelaysMs[drawerFetchRetryCount]
+                drawerFetchRetryCount++
+                mainHandler.postDelayed({ loadChannelsForDrawer() }, delay)
+            }
+            return
+        }
         allChannels = channels
         categories = channels.map { it.group.trim() }
             .filter { it.isNotEmpty() }
@@ -866,10 +1003,18 @@ class PlayerActivity : AppCompatActivity() {
                 updatePlayPauseIcon()
             }
         }
+        if (allChannels.isEmpty() && drawerFetchRetryCount == 0) {
+            loadChannelsForDrawer()
+        }
+        lastWatchdogPosition = -1L
+        lastWatchdogUnchangedCount = 0
+        mainHandler.removeCallbacks(stallWatchdogRunnable)
+        mainHandler.postDelayed(stallWatchdogRunnable, WATCHDOG_INTERVAL_MS)
     }
 
     override fun onStop() {
         super.onStop()
+        mainHandler.removeCallbacks(stallWatchdogRunnable)
         player?.release()
         player = null
     }
@@ -877,6 +1022,9 @@ class PlayerActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         mainHandler.removeCallbacksAndMessages(null)
+        releaseVlcFallback()
+        libVLC?.release()
+        libVLC = null
     }
 
     companion object {
@@ -884,6 +1032,7 @@ class PlayerActivity : AppCompatActivity() {
         private const val EPG_LABEL_REFRESH_MS = 30_000L
         private const val OVERLAY_AUTO_HIDE_MS = 4_000L
         private const val STATS_REFRESH_MS = 2_000L
+        private const val WATCHDOG_INTERVAL_MS = 8_000L
         private val timeFormat = SimpleDateFormat("HH:mm", Locale.US)
     }
 }

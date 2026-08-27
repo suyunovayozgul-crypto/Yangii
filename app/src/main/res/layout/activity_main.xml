@@ -66,13 +66,20 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_margin="12dp"
-            android:padding="10dp"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:paddingTop="10dp"
+            android:paddingBottom="10dp"
             android:hint="@string/search_hint"
             android:textColorHint="@color/muted"
             android:textColor="@color/text"
-            android:background="@color/panel"
+            android:textSize="14sp"
+            android:background="@drawable/bg_search_box"
+            android:drawableStart="@drawable/ic_search"
+            android:drawablePadding="10dp"
             android:inputType="text"
-            android:singleLine="true" />
+            android:singleLine="true"
+            android:imeOptions="actionSearch" />
 
         <TextView
             android:id="@+id/statusText"
