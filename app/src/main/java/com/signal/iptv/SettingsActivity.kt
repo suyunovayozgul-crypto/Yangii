@@ -1,5 +1,7 @@
 package com.signal.iptv
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.widget.ImageButton
 import android.widget.TextView
@@ -29,6 +31,12 @@ class SettingsActivity : AppCompatActivity() {
 
         langUz.setOnClickListener { applyLocale("uz") }
         langRu.setOnClickListener { applyLocale("ru") }
+
+        // Reklamasiz/qo'shimcha kanallar so'ragan foydalanuvchilar to'g'ridan-to'g'ri
+        // Telegram kanaliga o'tishi uchun — alohida qidirib topish shart emas.
+        findViewById<TextView>(R.id.settingsTelegram).setOnClickListener {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(MainActivity.TELEGRAM_URL)))
+        }
 
         refreshSelection()
     }

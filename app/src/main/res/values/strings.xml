@@ -52,6 +52,8 @@
     <string name="settings_language_title">Ilova tili</string>
     <string name="settings_language_uz">O\'zbekcha</string>
     <string name="settings_language_ru">Русский</string>
+    <string name="settings_other_title">Boshqa</string>
+    <string name="settings_telegram">Telegram kanalimiz</string>
     <string name="settings_back">Orqaga</string>
 
     <string name="player_play_button">Ijro etish</string>

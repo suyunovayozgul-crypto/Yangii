@@ -82,4 +82,36 @@
         android:textColor="@color/text"
         android:textSize="15sp" />
 
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp"
+        android:paddingTop="24dp"
+        android:paddingBottom="8dp"
+        android:text="@string/settings_other_title"
+        android:textColor="@color/muted"
+        android:textSize="12sp"
+        android:letterSpacing="0.08" />
+
+    <TextView
+        android:id="@+id/settingsTelegram"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="14dp"
+        android:layout_marginEnd="14dp"
+        android:layout_marginTop="6dp"
+        android:paddingStart="18dp"
+        android:paddingEnd="18dp"
+        android:paddingTop="16dp"
+        android:paddingBottom="16dp"
+        android:background="@drawable/bg_channel_item"
+        android:clickable="true"
+        android:focusable="true"
+        android:drawableStart="@drawable/ic_telegram"
+        android:drawablePadding="14dp"
+        android:text="@string/settings_telegram"
+        android:textColor="@color/text"
+        android:textSize="15sp" />
+
 </LinearLayout>

@@ -8,7 +8,7 @@ import android.os.Looper
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.GestureDetector
-import android.view.Gravity
+
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
@@ -24,7 +24,6 @@ import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import androidx.drawerlayout.widget.DrawerLayout
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
@@ -80,7 +79,7 @@ class PlayerActivity : AppCompatActivity() {
     private var resizeModeIndex = 0
     private var isLandscape = true
 
-    private lateinit var drawerLayout: DrawerLayout
+    private lateinit var channelsOverlay: View
     private lateinit var playerView: PlayerView
     private lateinit var overlayGroup: View
     private lateinit var titleView: TextView
@@ -90,7 +89,7 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var streamErrorView: TextView
     private lateinit var retryBtn: Button
     private lateinit var resizeLabel: TextView
-    private lateinit var tabsRow: LinearLayout
+    private lateinit var categoryRail: LinearLayout
     private lateinit var searchBox: EditText
     private lateinit var statusText: TextView
     private lateinit var channelRecycler: RecyclerView
@@ -133,8 +132,20 @@ class PlayerActivity : AppCompatActivity() {
 
         val name = intent.getStringExtra("channel_name") ?: ""
         val url = intent.getStringExtra("channel_url") ?: ""
+        // To'liq kanal ma'lumoti (tvg-id, logo, maxsus sarlavhalar) MainActivity'dan
+        // shu extra'lar orqali keladi — faqat nom/url o'tkazilsa, birinchi ochilgan
+        // kanalning EPG'i va maxsus User-Agent/Referer'i ishlamay qolar edi.
+        val initialChannel = Channel(
+            name = name,
+            url = url,
+            logo = intent.getStringExtra("channel_logo") ?: "",
+            group = intent.getStringExtra("channel_group") ?: "",
+            tvgId = intent.getStringExtra("channel_tvgid") ?: "",
+            userAgent = intent.getStringExtra("channel_useragent") ?: "",
+            referrer = intent.getStringExtra("channel_referrer") ?: ""
+        )
 
-        drawerLayout = findViewById(R.id.playerDrawerLayout)
+        channelsOverlay = findViewById(R.id.channelsOverlay)
         playerView = findViewById(R.id.playerView)
         overlayGroup = findViewById(R.id.overlayGroup)
         titleView = findViewById(R.id.playerTitle)
@@ -145,7 +156,7 @@ class PlayerActivity : AppCompatActivity() {
         retryBtn = findViewById(R.id.playerRetryBtn)
         retryBtn.stateListAnimator = null
         resizeLabel = findViewById(R.id.playerResizeLabel)
-        tabsRow = findViewById(R.id.playerTabsRow)
+        categoryRail = findViewById(R.id.categoryRail)
         searchBox = findViewById(R.id.playerSearchBox)
         statusText = findViewById(R.id.playerStatusText)
         channelRecycler = findViewById(R.id.playerChannelList)
@@ -155,8 +166,11 @@ class PlayerActivity : AppCompatActivity() {
 
         findViewById<ImageButton>(R.id.playerBackBtn).setOnClickListener { finish() }
         findViewById<ImageButton>(R.id.playerChannelsBtn).setOnClickListener {
-            drawerLayout.openDrawer(Gravity.END)
+            openChannelsOverlay()
             keepOverlayVisible()
+        }
+        findViewById<ImageButton>(R.id.channelsCloseBtn).setOnClickListener {
+            closeChannelsOverlay()
         }
         findViewById<ImageButton>(R.id.playerResizeBtn).setOnClickListener {
             cycleResizeMode()
@@ -193,7 +207,7 @@ class PlayerActivity : AppCompatActivity() {
 
         adapter = ChannelAdapter(emptyList()) { channel, _ ->
             playChannel(channel)
-            drawerLayout.closeDrawers()
+            closeChannelsOverlay()
         }
         channelRecycler.layoutManager = LinearLayoutManager(this)
         channelRecycler.adapter = adapter
@@ -209,7 +223,7 @@ class PlayerActivity : AppCompatActivity() {
 
         setupPlayer()
         setupGestures()
-        playChannel(Channel(name = name, url = url))
+        playChannel(initialChannel)
         loadChannelsForDrawer()
         scheduleAutoHide()
 
@@ -307,12 +321,7 @@ class PlayerActivity : AppCompatActivity() {
 
     private fun softRetry() {
         val channel = currentChannel ?: return
-        val exoPlayer = player ?: return
-        exoPlayer.stop()
-        exoPlayer.clearMediaItems()
-        exoPlayer.setMediaItem(MediaItem.fromUri(channel.url))
-        exoPlayer.prepare()
-        exoPlayer.playWhenReady = true
+        preparePlayback(channel)
     }
 
     /** Avtomatik, foydalanuvchiga ko'rinmaydigan to'liq playerni qayta yaratish. */
@@ -321,10 +330,7 @@ class PlayerActivity : AppCompatActivity() {
         setupPlayer()
         retryCount = 0
         val channel = currentChannel ?: return
-        val exoPlayer = player ?: return
-        exoPlayer.setMediaItem(MediaItem.fromUri(channel.url))
-        exoPlayer.prepare()
-        exoPlayer.playWhenReady = true
+        preparePlayback(channel)
         updatePlayPauseIcon()
     }
 
@@ -336,11 +342,39 @@ class PlayerActivity : AppCompatActivity() {
         player?.release()
         setupPlayer()
         val channel = currentChannel ?: return
+        preparePlayback(channel)
+        updatePlayPauseIcon()
+    }
+
+    /**
+     * Har bir kanal uchun media manbasini ALOHIDA quramiz (umumiy bitta
+     * DataSource.Factory o'rniga) — chunki ba'zi IPTV serverlar faqat playlist
+     * shu kanal uchun ko'rsatgan maxsus User-Agent yoki Referer bilan kelgan
+     * so'rovlarni qabul qiladi (#EXTVLCOPT yoki url|User-Agent=...&Referer=...
+     * ko'rinishida beriladi). Boshqa ilova (masalan Televizo) xuddi shu
+     * sarlavhalarni o'qib yuboradi, biz ham xuddi shunday qilishimiz kerak —
+     * aks holda o'sha kanal umuman ochilmaydi, garchi oqimning o'zi ishlab
+     * turgan bo'lsa ham.
+     */
+    private fun preparePlayback(channel: Channel) {
         val exoPlayer = player ?: return
-        exoPlayer.setMediaItem(MediaItem.fromUri(channel.url))
+        val userAgent = channel.userAgent.ifBlank { M3UParser.BROWSER_USER_AGENT }
+        val httpFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent(userAgent)
+            .setConnectTimeoutMs(15000)
+            .setReadTimeoutMs(15000)
+            .setAllowCrossProtocolRedirects(true)
+        if (channel.referrer.isNotBlank()) {
+            httpFactory.setDefaultRequestProperties(mapOf("Referer" to channel.referrer))
+        }
+        val mediaSource = DefaultMediaSourceFactory(httpFactory)
+            .createMediaSource(MediaItem.fromUri(channel.url))
+
+        exoPlayer.stop()
+        exoPlayer.clearMediaItems()
+        exoPlayer.setMediaSource(mediaSource)
         exoPlayer.prepare()
         exoPlayer.playWhenReady = true
-        updatePlayPauseIcon()
     }
 
     private fun statusHint(text: String) {
@@ -395,6 +429,18 @@ class PlayerActivity : AppCompatActivity() {
         }
     }
 
+    // === Kanallar to'liq ekran paneli ===
+
+    private fun openChannelsOverlay() {
+        channelsOverlay.visibility = View.VISIBLE
+    }
+
+    private fun closeChannelsOverlay() {
+        channelsOverlay.visibility = View.GONE
+    }
+
+    private fun isChannelsOverlayOpen(): Boolean = channelsOverlay.visibility == View.VISIBLE
+
     // === Overlay ko'rsatish / yashirish ===
 
     private fun setOverlayVisible(visible: Boolean) {
@@ -438,7 +484,7 @@ class PlayerActivity : AppCompatActivity() {
      * yopiq bo'lganda ishlaydi, aks holda pult ro'yxat ichida yurishi kerak.
      */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (event.action == KeyEvent.ACTION_DOWN && !drawerLayout.isDrawerOpen(Gravity.END)) {
+        if (event.action == KeyEvent.ACTION_DOWN && !isChannelsOverlayOpen()) {
             when (event.keyCode) {
                 // Pultdagi maxsus Channel+/- tugmalari har doim to'g'ridan-to'g'ri
                 // kanal almashtiradi — overlay ko'rinsin yoki yo'q, farqi yo'q.
@@ -525,16 +571,11 @@ class PlayerActivity : AppCompatActivity() {
         titleView.text = channel.name
         updateProgramLabel()
         statsView.visibility = View.GONE
-        val exoPlayer = player ?: return
         // Eski oqimni to'liq to'xtatib, media ro'yxatini tozalab, keyin yangisini
         // qo'yamiz — shunda avvalgi kanalning dekoder holati keyingi kanalga
         // "yopishib qolmaydi" (aynan shu, ba'zi kanal ishlab turib to'satdan
         // ishlamay qolishining asosiy sababi edi).
-        exoPlayer.stop()
-        exoPlayer.clearMediaItems()
-        exoPlayer.setMediaItem(MediaItem.fromUri(channel.url))
-        exoPlayer.prepare()
-        exoPlayer.playWhenReady = true
+        preparePlayback(channel)
         updatePlayPauseIcon()
         adapter.markSelectedByUrl(channel.url)
     }
@@ -696,17 +737,34 @@ class PlayerActivity : AppCompatActivity() {
         buildTabs()
         applyFilter()
         adapter.markSelectedByUrl(currentChannel?.url ?: "")
+
+        // To'liq ro'yxat yuklangач joriy kanalning mos yozuvini topib, uning
+        // tvg-id/guruh ma'lumotini sinxronlaymiz (ijro davom etadi, faqat EPG
+        // yorlig'i to'g'ri ko'rinishi uchun) — playback qayta boshlanmaydi.
+        val current = currentChannel
+        if (current != null) {
+            val match = channels.firstOrNull { it.url == current.url }
+            if (match != null && match.tvgId != current.tvgId) {
+                currentChannel = match
+                updateProgramLabel()
+            }
+        }
     }
 
+    /**
+     * Televizo uslubidagi chap ustun: toifalar tik ro'yxat holida, har biri
+     * to'liq kenglikda bosiladigan qator — gorizontal chip qatoridan farqli
+     * o'laroq, ko'p toifa bo'lsa ham hammasi tik skroll bilan ko'rinadi.
+     */
     private fun buildTabs() {
-        tabsRow.removeAllViews()
-        tabsRow.addView(makeTabButton(getString(R.string.category_all), currentCategory == null) {
+        categoryRail.removeAllViews()
+        categoryRail.addView(makeCategoryRow(getString(R.string.category_all), currentCategory == null) {
             currentCategory = null
             buildTabs()
             applyFilter()
         })
         categories.forEach { cat ->
-            tabsRow.addView(makeTabButton(cat.uppercase(), currentCategory == cat) {
+            categoryRail.addView(makeCategoryRow(cat.uppercase(), currentCategory == cat) {
                 currentCategory = cat
                 buildTabs()
                 applyFilter()
@@ -714,30 +772,28 @@ class PlayerActivity : AppCompatActivity() {
         }
     }
 
-    private fun makeTabButton(label: String, selected: Boolean, onClick: () -> Unit): Button {
-        val btn = Button(this)
-        btn.text = label
-        btn.textSize = 11f
-        btn.setPadding(32, 14, 32, 14)
-        btn.isAllCaps = true
-        btn.stateListAnimator = null
-        btn.minWidth = 0
-        btn.minimumWidth = 0
-        btn.setBackgroundResource(if (selected) R.drawable.tab_chip_selected else R.drawable.tab_chip_unselected)
-        btn.setTextColor(
-            ContextCompat.getColor(this, if (selected) R.color.bg else R.color.text)
+    private fun makeCategoryRow(label: String, selected: Boolean, onClick: () -> Unit): TextView {
+        val row = TextView(this)
+        row.text = label
+        row.textSize = 12.5f
+        val padH = (16 * resources.displayMetrics.density).toInt()
+        val padV = (13 * resources.displayMetrics.density).toInt()
+        row.setPadding(padH, padV, padH, padV)
+        row.setTextColor(
+            ContextCompat.getColor(this, if (selected) R.color.amber else R.color.text)
         )
-        val margin = (6 * resources.displayMetrics.density).toInt()
-        val params = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT,
+        row.setBackgroundColor(
+            ContextCompat.getColor(this, if (selected) R.color.panel2 else android.R.color.transparent)
+        )
+        row.isClickable = true
+        row.isFocusable = true
+        row.maxLines = 2
+        row.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
         )
-        params.marginStart = margin
-        params.topMargin = margin / 2
-        params.bottomMargin = margin / 2
-        btn.layoutParams = params
-        btn.setOnClickListener { onClick() }
-        return btn
+        row.setOnClickListener { onClick() }
+        return row
     }
 
     private fun applyFilter() {
@@ -786,8 +842,8 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     override fun onBackPressed() {
-        if (drawerLayout.isDrawerOpen(Gravity.END)) {
-            drawerLayout.closeDrawers()
+        if (isChannelsOverlayOpen()) {
+            closeChannelsOverlay()
         } else {
             super.onBackPressed()
         }
@@ -806,9 +862,7 @@ class PlayerActivity : AppCompatActivity() {
         if (player == null) {
             setupPlayer()
             currentChannel?.let { channel ->
-                player?.setMediaItem(MediaItem.fromUri(channel.url))
-                player?.prepare()
-                player?.playWhenReady = true
+                preparePlayback(channel)
                 updatePlayPauseIcon()
             }
         }

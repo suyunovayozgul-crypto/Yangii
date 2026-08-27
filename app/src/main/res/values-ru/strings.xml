@@ -52,6 +52,8 @@
     <string name="settings_language_title">Язык приложения</string>
     <string name="settings_language_uz">O\'zbekcha</string>
     <string name="settings_language_ru">Русский</string>
+    <string name="settings_other_title">Другое</string>
+    <string name="settings_telegram">Наш Telegram-канал</string>
     <string name="settings_back">Назад</string>
 
     <string name="player_play_button">Воспроизвести</string>

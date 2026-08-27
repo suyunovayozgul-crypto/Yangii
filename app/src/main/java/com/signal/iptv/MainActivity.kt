@@ -95,6 +95,11 @@ class MainActivity : AppCompatActivity() {
             val intent = Intent(this, PlayerActivity::class.java)
             intent.putExtra("channel_name", channel.name)
             intent.putExtra("channel_url", channel.url)
+            intent.putExtra("channel_group", channel.group)
+            intent.putExtra("channel_tvgid", channel.tvgId)
+            intent.putExtra("channel_logo", channel.logo)
+            intent.putExtra("channel_useragent", channel.userAgent)
+            intent.putExtra("channel_referrer", channel.referrer)
             startActivity(intent)
         }
         recyclerView.layoutManager = LinearLayoutManager(this)

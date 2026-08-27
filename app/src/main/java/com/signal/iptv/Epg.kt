@@ -96,17 +96,23 @@ object EpgRepository {
         }
     }
 
+    // Playlist va EPG fayli har xil provayderlardan kelgani uchun tvg-id yozilishi
+    // bir xil bo'lmasligi mumkin (katta/kichik harf, bo'sh joy) — shuning uchun
+    // kalitlar har doim normallashtirilgan (trim + lowercase) holda saqlanadi va
+    // qidiriladi, aks holda mos kelishi mumkin bo'lgan yozuvlar ham topilmay qolardi.
+    private fun normalizeId(id: String) = id.trim().lowercase()
+
     /** The programme airing right now on [tvgId], or null if unknown/no data. */
     fun currentProgramme(tvgId: String, now: Long = System.currentTimeMillis()): Programme? {
         if (tvgId.isBlank()) return null
-        val list = programmesByChannel[tvgId] ?: return null
+        val list = programmesByChannel[normalizeId(tvgId)] ?: return null
         return list.firstOrNull { now in it.start until it.stop }
     }
 
     /** The next scheduled programme on [tvgId] after [now], or null. */
     fun nextProgramme(tvgId: String, now: Long = System.currentTimeMillis()): Programme? {
         if (tvgId.isBlank()) return null
-        val list = programmesByChannel[tvgId] ?: return null
+        val list = programmesByChannel[normalizeId(tvgId)] ?: return null
         return list.firstOrNull { it.start >= now }
     }
 
@@ -116,15 +122,24 @@ object EpgRepository {
      */
     fun fullSchedule(tvgId: String): List<Programme> {
         if (tvgId.isBlank()) return emptyList()
-        return (programmesByChannel[tvgId] ?: emptyList()).sortedBy { it.start }
+        return (programmesByChannel[normalizeId(tvgId)] ?: emptyList()).sortedBy { it.start }
     }
 
     private fun fetchAndParse(url: String): Map<String, List<Programme>> {
         val connection = URL(url).openConnection() as HttpURLConnection
         connection.connectTimeout = 20000
-        connection.readTimeout = 30000
+        // EPG fayllari (ayniqsa gzip ochilgandan keyin) o'nlab megabaytgacha
+        // borishi mumkin — sekin mobil tarmoqda 30s yetarli emas edi, shu
+        // sabab EPG hech qachon "isLoaded" holatiga o'tolmay, doim
+        // "yangilanmoqda" holida qolib ketardi.
+        connection.readTimeout = 90000
         connection.instanceFollowRedirects = true
-        connection.setRequestProperty("User-Agent", "Mozilla/5.0 (MirovoyTV Android)")
+        // Ba'zi EPG serverlari (jumladan iptvx.one) generik/no'malum User-Agent'li
+        // so'rovlarni bloklaydi — Televizo kabi haqiqiy ilovalar brauzerga o'xshash
+        // sarlavha bilan so'raydi, biz ham xuddi shunday qilamiz.
+        connection.setRequestProperty("User-Agent", M3UParser.BROWSER_USER_AGENT)
+        connection.setRequestProperty("Accept", "*/*")
+        connection.setRequestProperty("Referer", url)
 
         val buffered = BufferedInputStream(connection.inputStream)
         buffered.mark(2)
@@ -174,7 +189,8 @@ object EpgRepository {
                         "programme" -> {
                             val channelId = curChannel
                             if (!channelId.isNullOrBlank() && curStart > 0L && curStop > 0L) {
-                                map.getOrPut(channelId) { mutableListOf() }
+                                val key = normalizeId(channelId)
+                                map.getOrPut(key) { mutableListOf() }
                                     .add(Programme(channelId, curStart, curStop, titleBuilder.toString().trim()))
                             }
                             curChannel = null
@@ -190,12 +206,22 @@ object EpgRepository {
 
     private const val RETRY_DELAY_MS = 45_000L
 
+    // XMLTV manbalari vaqtni turlicha formatda beradi: "20260826120000 +0500",
+    // "20260826120000+0500" (bo'shliqsiz) yoki hech qanday zona ko'rsatmasdan
+    // "20260826120000". Faqat bitta qat'iy formatni kutish ba'zi manbalarda
+    // butun faylni "0 dastur topildi" holiga olib kelishi mumkin edi.
+    private val timeFormatNoSpace = SimpleDateFormat("yyyyMMddHHmmssZ", Locale.US)
+    private val timeFormatNoZone = SimpleDateFormat("yyyyMMddHHmmss", Locale.US)
+
     private fun parseTime(raw: String?): Long {
         if (raw.isNullOrBlank()) return 0L
-        return try {
-            timeFormat.parse(raw.trim())?.time ?: 0L
-        } catch (e: Exception) {
-            0L
+        val trimmed = raw.trim()
+        timeFormat.runCatching { parse(trimmed)?.time }.getOrNull()?.let { return it }
+        timeFormatNoSpace.runCatching { parse(trimmed.replace(" ", ""))?.time }.getOrNull()?.let { return it }
+        val digitsOnly = trimmed.takeWhile { it.isDigit() }
+        if (digitsOnly.length >= 14) {
+            timeFormatNoZone.runCatching { parse(digitsOnly.substring(0, 14))?.time }.getOrNull()?.let { return it }
         }
+        return 0L
     }
 }
