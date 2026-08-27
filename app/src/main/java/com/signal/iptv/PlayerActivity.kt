@@ -32,6 +32,7 @@ import androidx.media3.ui.PlayerView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.NextRenderersFactory
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import java.util.concurrent.Executors
 import kotlin.math.abs
 
@@ -162,7 +163,7 @@ class PlayerActivity : AppCompatActivity() {
         // ovoz esa sukut saqlaydi) — shu factory bo'lsa, ExoPlayer avtomatik ravishda
         // FFmpeg dasturiy dekoderiga o'tadi.
         val renderersFactory = NextRenderersFactory(this)
-            .setExtensionRendererMode(NextRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
 
         val exoPlayer = ExoPlayer.Builder(this, renderersFactory)
             .setMediaSourceFactory(mediaSourceFactory)
