@@ -1,0 +1,73 @@
+SIGNAL IPTV — NATIVE ANDROID ILOVA (.apk) — YIG'ISH YO'RIQNOMASI
+====================================================================
+
+Bu — to'liq ishlaydigan native Android loyiha (Kotlin + Gradle).
+Kanallar iptv-org'dan olinadi (bepul, qonuniy, jamoat translyatsiyalari).
+Ikkita yo'l bilan haqiqiy .apk faylini kompyutersiz yig'ishingiz mumkin.
+
+
+YO'L 1 — AIDE (telefonning o'zida, internetsiz ham build)
+====================================================================
+1. Play Store'dan "AIDE - IDE for Android Java C++" ilovasini o'rnating
+2. Ushbu SignalIPTV papkasini (barcha fayllar bilan) telefoningizga
+   ko'chiring (zip holida yuborilgan bo'lsa — avval arxivdan chiqaring)
+3. AIDE'ni oching > "Open Project" > SignalIPTV papkasini tanlang
+   (AIDE build.gradle faylini avtomatik tanib, Gradle loyihasi
+   sifatida ochadi)
+4. AIDE birinchi ochilishda kerakli komponentlarni (Android SDK,
+   Gradle) internet orqali avtomatik yuklab oladi — shuning uchun
+   birinchi build vaqtida Wi-Fi kerak
+5. Yuqori o'ng burchakdagi "Run ▷" yoki "Build" tugmasini bosing
+6. Build tugagach, tayyor .apk fayl avtomatik telefoningizga
+   o'rnatiladi (yoki Project papkasi > app > build > outputs > apk
+   ichida saqlanadi — shu yerdan boshqalarga ulashing)
+
+
+YO'L 2 — GitHub Codespaces / Gitpod (bulutda, brauzer orqali)
+====================================================================
+1. github.com'da bepul akkaunt oching (agar yo'q bo'lsa)
+2. Yangi repository yarating, SignalIPTV papkasidagi BARCHA
+   fayllarni (shu jumladan yashirin .devcontainer va .gitignore)
+   shu repога yuklang
+3. Repo sahifasida yashil "Code" tugmasi > "Codespaces" bo'limi >
+   "Create codespace on main" ni bosing
+4. Bir necha daqiqada brauzeringizda to'liq Linux muhit ochiladi —
+   .devcontainer/devcontainer.json fayli tufayli Android SDK va
+   Gradle avtomatik o'rnatilgan bo'ladi
+5. Pastdagi terminalga shuni yozing:
+
+     gradle assembleDebug
+
+6. Build tugagach, tayyor fayl shu yerda paydo bo'ladi:
+
+     app/build/outputs/apk/debug/app-debug.apk
+
+7. Fayllar panelidan shu .apk'ga o'ng tugmani bosib "Download"
+   qiling — endi uni odamlarga to'g'ridan-to'g'ri yubora olasiz
+
+Eslatma: Gitpod.io ham xuddi shunday ishlaydi — repo havolasi
+oldiga "gitpod.io/#" qo'shib ochish kifoya.
+
+
+O'RNATISH (odamlar tomonidan)
+====================================================================
+Tayyor .apk faylni Telegram/WhatsApp orqali yuborasiz. Qabul
+qiluvchi telefon sozlamalarida "Noma'lum manbalardan o'rnatishga
+ruxsat berish" (Install unknown apps) ni yoqib, faylni ochib
+o'rnatadi.
+
+
+LOYIHA TARKIBI
+====================================================================
+app/src/main/java/com/signal/iptv/
+  MainActivity.kt      — kanal ro'yxati, kategoriyalar, qidiruv
+  PlayerActivity.kt     — ExoPlayer asosidagi video pleer
+  M3UParser.kt          — M3U playlistni o'qish
+  ChannelAdapter.kt      — ro'yxat elementlari
+  Channel.kt            — data model
+app/src/main/res/       — barcha layout, rang, matn, ikonka fayllari
+
+Kategoriyalarni yoki ranglarni o'zgartirmoqchi bo'lsangiz:
+  - Kanallar manbai: MainActivity.kt ichidagi "categories" ro'yxati
+  - Ranglar: res/values/colors.xml
+  - Ilova nomi: res/values/strings.xml
