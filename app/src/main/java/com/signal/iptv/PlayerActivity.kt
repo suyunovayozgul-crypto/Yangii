@@ -9,6 +9,7 @@ import android.text.Editable
 import android.text.TextWatcher
 import android.view.GestureDetector
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowInsets
@@ -25,6 +26,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -62,6 +64,7 @@ class PlayerActivity : AppCompatActivity() {
 
     private lateinit var drawerLayout: DrawerLayout
     private lateinit var playerView: PlayerView
+    private lateinit var overlayGroup: View
     private lateinit var titleView: TextView
     private lateinit var programView: TextView
     private lateinit var resizeLabel: TextView
@@ -71,6 +74,7 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var channelRecycler: RecyclerView
     private lateinit var adapter: ChannelAdapter
     private lateinit var gestureDetector: GestureDetector
+    private lateinit var playPauseBtn: ImageButton
 
     private val epgRefreshRunnable = object : Runnable {
         override fun run() {
@@ -85,6 +89,12 @@ class PlayerActivity : AppCompatActivity() {
         }.start()
     }
 
+    // Overlay (tepadagi panel + o'ng tomondagi tugmalar) bir marta bosilganda
+    // ko'rinadi/yashiriladi, va harakatsiz qolsa o'zi avtomatik yashiriladi —
+    // shu bilan videoning to'liq ekranda "qora panel yopishib qolgan" holati tuzatiladi.
+    private var overlayVisible = true
+    private val hideOverlayRunnable = Runnable { setOverlayVisible(false) }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
@@ -96,6 +106,7 @@ class PlayerActivity : AppCompatActivity() {
 
         drawerLayout = findViewById(R.id.playerDrawerLayout)
         playerView = findViewById(R.id.playerView)
+        overlayGroup = findViewById(R.id.overlayGroup)
         titleView = findViewById(R.id.playerTitle)
         programView = findViewById(R.id.playerProgram)
         resizeLabel = findViewById(R.id.playerResizeLabel)
@@ -103,15 +114,35 @@ class PlayerActivity : AppCompatActivity() {
         searchBox = findViewById(R.id.playerSearchBox)
         statusText = findViewById(R.id.playerStatusText)
         channelRecycler = findViewById(R.id.playerChannelList)
+        playPauseBtn = findViewById(R.id.playerPlayPauseBtn)
 
         titleView.text = name
 
         findViewById<ImageButton>(R.id.playerBackBtn).setOnClickListener { finish() }
         findViewById<ImageButton>(R.id.playerChannelsBtn).setOnClickListener {
             drawerLayout.openDrawer(Gravity.END)
+            keepOverlayVisible()
         }
-        findViewById<ImageButton>(R.id.playerResizeBtn).setOnClickListener { cycleResizeMode() }
-        findViewById<ImageButton>(R.id.playerRotateBtn).setOnClickListener { toggleOrientation() }
+        findViewById<ImageButton>(R.id.playerResizeBtn).setOnClickListener {
+            cycleResizeMode()
+            keepOverlayVisible()
+        }
+        findViewById<ImageButton>(R.id.playerRotateBtn).setOnClickListener {
+            toggleOrientation()
+            keepOverlayVisible()
+        }
+        findViewById<ImageButton>(R.id.playerChannelUpBtn).setOnClickListener {
+            switchChannel(1)
+            keepOverlayVisible()
+        }
+        findViewById<ImageButton>(R.id.playerChannelDownBtn).setOnClickListener {
+            switchChannel(-1)
+            keepOverlayVisible()
+        }
+        playPauseBtn.setOnClickListener {
+            togglePlayPause()
+            keepOverlayVisible()
+        }
 
         adapter = ChannelAdapter(emptyList()) { channel, _ ->
             playChannel(channel)
@@ -130,9 +161,10 @@ class PlayerActivity : AppCompatActivity() {
         })
 
         setupPlayer()
-        setupSwipeGesture()
+        setupGestures()
         playChannel(Channel(name = name, url = url))
         loadChannelsForDrawer()
+        scheduleAutoHide()
 
         EpgRepository.ensureLoaded(MainActivity.EPG_URL) {
             updateProgramLabel()
@@ -161,12 +193,26 @@ class PlayerActivity : AppCompatActivity() {
         // Ko'p bepul IPTV kanallari AC-3/E-AC-3 audio bilan keladi; standart
         // MediaCodec dekoder buni har doim ham qo'llab-quvvatlamaydi (video ketadi,
         // ovoz esa sukut saqlaydi) — shu factory bo'lsa, ExoPlayer avtomatik ravishda
-        // FFmpeg dasturiy dekoderiga o'tadi.
+        // FFmpeg dasturiy dekoderiga o'tadi (avval hardware, keyin fallback sifatida).
         val renderersFactory = NextRenderersFactory(this)
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
 
+        // Jonli IPTV oqimlar uchun moslashtirilgan bufer: kanal ochilganda
+        // tezroq boshlansin, internet birozgina sekinlashsa ham qayta-qayta
+        // "yuklanmoqda" chiqavermasin.
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                15_000, // minBufferMs
+                50_000, // maxBufferMs
+                1_000,  // bufferForPlaybackMs — birinchi kadr shu qadar bufer bilan boshlaydi
+                2_000   // bufferForPlaybackAfterRebufferMs
+            )
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .build()
+
         val exoPlayer = ExoPlayer.Builder(this, renderersFactory)
             .setMediaSourceFactory(mediaSourceFactory)
+            .setLoadControl(loadControl)
             .build()
         player = exoPlayer
         playerView.player = exoPlayer
@@ -184,15 +230,16 @@ class PlayerActivity : AppCompatActivity() {
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying) retryCount = 0
+                updatePlayPauseIcon()
             }
         })
     }
 
     /**
-     * Jonli efirda menyuga qaytmasdan kanal almashtirish: ekranda tepaga
-     * yoki pastga svayp qilish keyingi/oldingi kanalga o'tkazadi.
+     * Video ustida bir marta bosish — overlayni ko'rsatish/yashirish.
+     * Tepaga/pastga svayp — jonli efirda menyuga qaytmasdan kanal almashtirish.
      */
-    private fun setupSwipeGesture() {
+    private fun setupGestures() {
         gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onFling(
                 e1: MotionEvent?,
@@ -205,15 +252,106 @@ class PlayerActivity : AppCompatActivity() {
                 val deltaX = e2.x - e1.x
                 if (abs(deltaY) > abs(deltaX) && abs(deltaY) > SWIPE_MIN_DISTANCE_PX) {
                     if (deltaY < 0) switchChannel(1) else switchChannel(-1)
+                    keepOverlayVisible()
                     return true
                 }
                 return false
             }
+
+            override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                setOverlayVisible(!overlayVisible)
+                return true
+            }
         })
         playerView.setOnTouchListener { _, event ->
             gestureDetector.onTouchEvent(event)
-            false
+            true
         }
+    }
+
+    // === Overlay ko'rsatish / yashirish ===
+
+    private fun setOverlayVisible(visible: Boolean) {
+        overlayVisible = visible
+        overlayGroup.visibility = if (visible) View.VISIBLE else View.GONE
+        mainHandler.removeCallbacks(hideOverlayRunnable)
+        if (visible) {
+            mainHandler.postDelayed(hideOverlayRunnable, OVERLAY_AUTO_HIDE_MS)
+        }
+    }
+
+    /** Overlay tugmalaridan biri bosilganda — panel ko'rinishda qolsin va taymer qayta boshlansin. */
+    private fun keepOverlayVisible() {
+        overlayVisible = true
+        overlayGroup.visibility = View.VISIBLE
+        mainHandler.removeCallbacks(hideOverlayRunnable)
+        mainHandler.postDelayed(hideOverlayRunnable, OVERLAY_AUTO_HIDE_MS)
+    }
+
+    private fun scheduleAutoHide() {
+        mainHandler.removeCallbacks(hideOverlayRunnable)
+        mainHandler.postDelayed(hideOverlayRunnable, OVERLAY_AUTO_HIDE_MS)
+    }
+
+    private fun togglePlayPause() {
+        val exoPlayer = player ?: return
+        exoPlayer.playWhenReady = !exoPlayer.playWhenReady
+        updatePlayPauseIcon()
+    }
+
+    private fun updatePlayPauseIcon() {
+        val isPlaying = player?.playWhenReady == true
+        playPauseBtn.setImageResource(if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play)
+        playPauseBtn.contentDescription =
+            getString(if (isPlaying) R.string.player_pause_button else R.string.player_play_button)
+    }
+
+    /**
+     * TV pult tugmalari: DPAD Up/Down va Channel Up/Down bevosita kanal
+     * almashtiradi — menyuni ochish shart emas. Bu faqat kanallar oynasi
+     * yopiq bo'lganda ishlaydi, aks holda pult ro'yxat ichida yurishi kerak.
+     */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN && !drawerLayout.isDrawerOpen(Gravity.END)) {
+            when (event.keyCode) {
+                // Pultdagi maxsus Channel+/- tugmalari har doim to'g'ridan-to'g'ri
+                // kanal almashtiradi — overlay ko'rinsin yoki yo'q, farqi yo'q.
+                KeyEvent.KEYCODE_CHANNEL_UP -> {
+                    switchChannel(1)
+                    keepOverlayVisible()
+                    return true
+                }
+                KeyEvent.KEYCODE_CHANNEL_DOWN -> {
+                    switchChannel(-1)
+                    keepOverlayVisible()
+                    return true
+                }
+                // DPAD Up/Down: overlay yashirin bo'lsa (ya'ni foydalanuvchi shunchaki
+                // tomosha qilyapti) — bitta bosishning o'zi bevosita kanal almashtiradi.
+                // Overlay ochiq bo'lsa — bu tugmalar pult bilan tugmalar orasida
+                // yurish uchun tizimga qoldiriladi (fokusni boshqarish uchun).
+                KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    if (!overlayVisible) {
+                        switchChannel(if (event.keyCode == KeyEvent.KEYCODE_DPAD_UP) 1 else -1)
+                        keepOverlayVisible()
+                        return true
+                    }
+                }
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                    val focused = currentFocus
+                    if (!overlayVisible || focused == null || focused === playerView) {
+                        setOverlayVisible(!overlayVisible)
+                        return true
+                    }
+                }
+                KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_SPACE -> {
+                    togglePlayPause()
+                    keepOverlayVisible()
+                    return true
+                }
+            }
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     private fun switchChannel(direction: Int) {
@@ -262,6 +400,8 @@ class PlayerActivity : AppCompatActivity() {
         exoPlayer.setMediaItem(MediaItem.fromUri(channel.url))
         exoPlayer.prepare()
         exoPlayer.playWhenReady = true
+        updatePlayPauseIcon()
+        adapter.markSelectedByUrl(channel.url)
     }
 
     private fun updateProgramLabel() {
@@ -297,6 +437,7 @@ class PlayerActivity : AppCompatActivity() {
             .sorted()
         buildTabs()
         applyFilter()
+        adapter.markSelectedByUrl(currentChannel?.url ?: "")
     }
 
     private fun buildTabs() {
@@ -357,6 +498,7 @@ class PlayerActivity : AppCompatActivity() {
         } else {
             statusText.visibility = View.GONE
             adapter.updateData(filtered)
+            adapter.markSelectedByUrl(currentChannel?.url ?: "")
         }
     }
 
@@ -407,5 +549,6 @@ class PlayerActivity : AppCompatActivity() {
     companion object {
         private const val SWIPE_MIN_DISTANCE_PX = 120
         private const val EPG_LABEL_REFRESH_MS = 30_000L
+        private const val OVERLAY_AUTO_HIDE_MS = 4_000L
     }
 }

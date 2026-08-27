@@ -34,4 +34,17 @@
     <string name="resize_fill">TO\'LDIRISH</string>
 
     <string name="epg_now_prefix">Hozir: %1$s</string>
+
+    <string name="menu_settings">Sozlamalar</string>
+    <string name="settings_title">Sozlamalar</string>
+    <string name="settings_language_title">Ilova tili</string>
+    <string name="settings_language_uz">O\'zbekcha</string>
+    <string name="settings_language_ru">Русский</string>
+    <string name="settings_back">Orqaga</string>
+
+    <string name="player_play_button">Ijro etish</string>
+    <string name="player_pause_button">Pauza</string>
+    <string name="player_channel_up_button">Keyingi kanal</string>
+    <string name="player_channel_down_button">Oldingi kanal</string>
+    <string name="player_settings_button">Sozlamalar</string>
 </resources>

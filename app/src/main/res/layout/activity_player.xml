@@ -11,88 +11,140 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent">
 
+        <!-- use_controller=false: Media3'ning standart (VOD uchun mo'ljallangan
+             seek-bar / 5s-15s tez orqaga-oldinga) boshqaruvi butunlay o'chirilgan.
+             Jonli TV kanal uchun bularning hech biri kerak emas va aynan shular
+             "sekund sanab" ko'rinishga sabab bo'lgan. O'rniga pastda o'zimizning
+             overlay boshqaruvimiz bor. -->
         <androidx.media3.ui.PlayerView
             android:id="@+id/playerView"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:background="#000000"
-            app:use_controller="true"
+            app:use_controller="false"
             app:show_buffering="always"
             app:resize_mode="fit" />
 
-        <LinearLayout
-            android:id="@+id/playerTopBar"
+        <!-- Bosilganda 4 soniyadan keyin o'zi yashirinadigan overlay guruhi -->
+        <FrameLayout
+            android:id="@+id/overlayGroup"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_gravity="top"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:background="@color/overlay_bar"
-            android:paddingStart="4dp"
-            android:paddingEnd="8dp"
-            android:paddingTop="6dp"
-            android:paddingBottom="6dp">
-
-            <ImageButton
-                android:id="@+id/playerBackBtn"
-                android:layout_width="44dp"
-                android:layout_height="44dp"
-                android:background="?android:attr/selectableItemBackgroundBorderless"
-                android:src="@drawable/ic_back"
-                android:contentDescription="@string/player_back_button" />
+            android:layout_height="match_parent">
 
             <LinearLayout
-                android:layout_width="0dp"
+                android:id="@+id/playerTopBar"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:layout_marginStart="8dp"
-                android:orientation="vertical">
+                android:layout_gravity="top"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:background="@drawable/gradient_top_bar"
+                android:paddingStart="4dp"
+                android:paddingEnd="8dp"
+                android:paddingTop="10dp"
+                android:paddingBottom="20dp">
 
-                <TextView
-                    android:id="@+id/playerTitle"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:textColor="@color/amber"
-                    android:textSize="14sp"
-                    android:textStyle="bold"
-                    android:maxLines="1"
-                    android:ellipsize="end" />
+                <ImageButton
+                    android:id="@+id/playerBackBtn"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:background="@drawable/bg_control_circle_focus"
+                    android:src="@drawable/ic_back"
+                    android:contentDescription="@string/player_back_button" />
 
-                <TextView
-                    android:id="@+id/playerProgram"
-                    android:layout_width="match_parent"
+                <LinearLayout
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:textColor="@color/cyan"
-                    android:textSize="11sp"
-                    android:maxLines="1"
-                    android:ellipsize="end"
-                    android:visibility="gone" />
+                    android:layout_weight="1"
+                    android:layout_marginStart="10dp"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/playerTitle"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="@color/amber"
+                        android:textSize="15sp"
+                        android:textStyle="bold"
+                        android:maxLines="1"
+                        android:ellipsize="end" />
+
+                    <TextView
+                        android:id="@+id/playerProgram"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="@color/cyan"
+                        android:textSize="12sp"
+                        android:maxLines="1"
+                        android:ellipsize="end"
+                        android:visibility="gone" />
+                </LinearLayout>
+
+                <ImageButton
+                    android:id="@+id/playerRotateBtn"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:background="@drawable/bg_control_circle_focus"
+                    android:src="@drawable/ic_rotate"
+                    android:contentDescription="@string/player_rotate_button" />
+
+                <ImageButton
+                    android:id="@+id/playerResizeBtn"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:layout_marginStart="4dp"
+                    android:background="@drawable/bg_control_circle_focus"
+                    android:src="@drawable/ic_resize"
+                    android:contentDescription="@string/player_resize_button" />
+
+                <ImageButton
+                    android:id="@+id/playerChannelsBtn"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:layout_marginStart="4dp"
+                    android:background="@drawable/bg_control_circle_focus"
+                    android:src="@drawable/ic_channels"
+                    android:contentDescription="@string/player_channels_button" />
             </LinearLayout>
 
-            <ImageButton
-                android:id="@+id/playerRotateBtn"
-                android:layout_width="44dp"
-                android:layout_height="44dp"
-                android:background="?android:attr/selectableItemBackgroundBorderless"
-                android:src="@drawable/ic_rotate"
-                android:contentDescription="@string/player_rotate_button" />
+            <!-- O'ng tomonda tik joylashgan kanal ▲▼ va play/pause —
+                 barmoq bilan bosish uchun ham, pult D-pad fokusi uchun ham ishlaydi -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_vertical|end"
+                android:layout_marginEnd="18dp"
+                android:orientation="vertical"
+                android:gravity="center_horizontal">
 
-            <ImageButton
-                android:id="@+id/playerResizeBtn"
-                android:layout_width="44dp"
-                android:layout_height="44dp"
-                android:background="?android:attr/selectableItemBackgroundBorderless"
-                android:src="@drawable/ic_resize"
-                android:contentDescription="@string/player_resize_button" />
+                <ImageButton
+                    android:id="@+id/playerChannelUpBtn"
+                    android:layout_width="52dp"
+                    android:layout_height="52dp"
+                    android:background="@drawable/bg_control_circle_focus"
+                    android:src="@drawable/ic_chevron_up"
+                    android:contentDescription="@string/player_channel_up_button" />
 
-            <ImageButton
-                android:id="@+id/playerChannelsBtn"
-                android:layout_width="44dp"
-                android:layout_height="44dp"
-                android:background="?android:attr/selectableItemBackgroundBorderless"
-                android:src="@drawable/ic_channels"
-                android:contentDescription="@string/player_channels_button" />
-        </LinearLayout>
+                <ImageButton
+                    android:id="@+id/playerPlayPauseBtn"
+                    android:layout_width="60dp"
+                    android:layout_height="60dp"
+                    android:layout_marginTop="14dp"
+                    android:layout_marginBottom="14dp"
+                    android:background="@drawable/bg_control_circle_focus"
+                    android:src="@drawable/ic_pause"
+                    android:contentDescription="@string/player_pause_button" />
+
+                <ImageButton
+                    android:id="@+id/playerChannelDownBtn"
+                    android:layout_width="52dp"
+                    android:layout_height="52dp"
+                    android:background="@drawable/bg_control_circle_focus"
+                    android:src="@drawable/ic_chevron_down"
+                    android:contentDescription="@string/player_channel_down_button" />
+            </LinearLayout>
+
+        </FrameLayout>
 
         <TextView
             android:id="@+id/playerResizeLabel"

@@ -23,6 +23,7 @@ class ChannelAdapter(
         val name: TextView = view.findViewById(R.id.chName)
         val group: TextView = view.findViewById(R.id.chGroup)
         val program: TextView = view.findViewById(R.id.chProgram)
+        val selectedDot: View = view.findViewById(R.id.chSelectedDot)
         val root: View = view
     }
 
@@ -68,6 +69,7 @@ class ChannelAdapter(
         }
 
         holder.root.isSelected = position == selectedPosition
+        holder.selectedDot.visibility = if (position == selectedPosition) View.VISIBLE else View.GONE
         holder.root.setOnClickListener {
             val previous = selectedPosition
             selectedPosition = holder.adapterPosition
@@ -88,6 +90,15 @@ class ChannelAdapter(
     /** Call after EPG data (re)loads, or periodically, to refresh the "Hozir: ..." rows. */
     fun refreshEpgRows() {
         notifyDataSetChanged()
+    }
+
+    /** Highlights the row whose stream URL matches [url] (e.g. the channel currently playing). */
+    fun markSelectedByUrl(url: String) {
+        val index = channels.indexOfFirst { it.url == url }
+        val previous = selectedPosition
+        selectedPosition = index
+        if (previous != RecyclerView.NO_POSITION) notifyItemChanged(previous)
+        if (selectedPosition != RecyclerView.NO_POSITION) notifyItemChanged(selectedPosition)
     }
 
     fun clearSelection() {

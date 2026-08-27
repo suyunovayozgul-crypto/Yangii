@@ -179,6 +179,12 @@
                 android:drawableStart="@drawable/ic_info"
                 android:text="@string/menu_about" />
 
+            <TextView
+                android:id="@+id/drawerSettings"
+                style="@style/DrawerRow"
+                android:drawableStart="@drawable/ic_settings"
+                android:text="@string/menu_settings" />
+
         </LinearLayout>
     </ScrollView>
 

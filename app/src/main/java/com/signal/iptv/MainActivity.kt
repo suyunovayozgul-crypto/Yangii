@@ -86,6 +86,10 @@ class MainActivity : AppCompatActivity() {
             drawerLayout.closeDrawers()
             showAbout()
         }
+        findViewById<TextView>(R.id.drawerSettings).setOnClickListener {
+            drawerLayout.closeDrawers()
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }
 
         adapter = ChannelAdapter(emptyList()) { channel, _ ->
             val intent = Intent(this, PlayerActivity::class.java)

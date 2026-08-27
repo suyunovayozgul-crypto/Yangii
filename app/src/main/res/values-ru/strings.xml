@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Mirovoy TV</string>
+    <string name="loading">Загрузка…</string>
+    <string name="search_hint">Поиск канала…</string>
+    <string name="no_channels">Каналы не найдены.</string>
+    <string name="load_error">Ошибка: не удалось загрузить список. Проверьте интернет. (%1$s)</string>
+    <string name="stream_error">Ошибка потока: %1$s сейчас недоступен</string>
+    <string name="retry">Повторить</string>
+
+    <string name="category_all">ВСЕ</string>
+    <string name="category_other">ДРУГОЕ</string>
+
+    <string name="menu_open">Открыть меню</string>
+    <string name="menu_close">Закрыть меню</string>
+    <string name="menu_channels_title">Каналы</string>
+    <string name="menu_all_channels">Все каналы</string>
+    <string name="menu_telegram">Наш Telegram-канал</string>
+    <string name="menu_about">О приложении</string>
+    <string name="menu_categories_title">КАТЕГОРИИ</string>
+
+    <string name="about_title">О Mirovoy TV</string>
+    <string name="about_body">Mirovoy TV — приложение для бесплатного просмотра прямых эфиров.\n\nПодпишитесь на наш Telegram-канал, чтобы узнавать о новых каналах и обновлениях:\nt.me/mirovoytvuz</string>
+    <string name="about_ok">Закрыть</string>
+
+    <string name="player_channels_button">Список каналов</string>
+    <string name="player_back_button">Назад</string>
+    <string name="player_resize_button">Изменить масштаб экрана</string>
+    <string name="player_rotate_button">Повернуть экран</string>
+    <string name="live_badge">ЭФИР</string>
+
+    <string name="resize_fit">ПО РАЗМЕРУ</string>
+    <string name="resize_zoom">УВЕЛИЧИТЬ</string>
+    <string name="resize_fill">ЗАПОЛНИТЬ</string>
+
+    <string name="epg_now_prefix">Сейчас: %1$s</string>
+
+    <string name="menu_settings">Настройки</string>
+    <string name="settings_title">Настройки</string>
+    <string name="settings_language_title">Язык приложения</string>
+    <string name="settings_language_uz">O\'zbekcha</string>
+    <string name="settings_language_ru">Русский</string>
+    <string name="settings_back">Назад</string>
+
+    <string name="player_play_button">Воспроизвести</string>
+    <string name="player_pause_button">Пауза</string>
+    <string name="player_channel_up_button">Следующий канал</string>
+    <string name="player_channel_down_button">Предыдущий канал</string>
+    <string name="player_settings_button">Настройки</string>
+</resources>
