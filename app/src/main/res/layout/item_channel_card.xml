@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="104dp"
+    android:layout_height="wrap_content"
+    android:layout_marginEnd="10dp"
+    android:orientation="vertical"
+    android:gravity="center_horizontal"
+    android:paddingTop="6dp"
+    android:paddingBottom="6dp"
+    android:focusable="true"
+    android:clickable="true"
+    android:background="@drawable/bg_channel_card">
+
+    <FrameLayout
+        android:layout_width="88dp"
+        android:layout_height="88dp">
+
+        <ImageView
+            android:id="@+id/cardLogo"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@drawable/bg_channel_logo"
+            android:scaleType="fitCenter"
+            android:padding="10dp" />
+
+        <View
+            android:id="@+id/cardSelectedRing"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@drawable/bg_channel_card_selected_ring"
+            android:visibility="gone" />
+    </FrameLayout>
+
+    <TextView
+        android:id="@+id/cardName"
+        android:layout_width="88dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:textColor="@color/text"
+        android:textSize="11.5sp"
+        android:gravity="center"
+        android:maxLines="2"
+        android:ellipsize="end" />
+
+    <TextView
+        android:id="@+id/cardProgram"
+        android:layout_width="88dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="1dp"
+        android:textColor="@color/cyan"
+        android:textSize="9sp"
+        android:gravity="center"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:visibility="gone" />
+
+</LinearLayout>
