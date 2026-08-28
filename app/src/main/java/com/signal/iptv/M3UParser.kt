@@ -27,6 +27,39 @@ object M3UParser {
     private val extHttpUaRegex = Regex(""""user-agent"\s*:\s*"([^"]*)"""", RegexOption.IGNORE_CASE)
     private val extHttpRefRegex = Regex(""""referr?er"\s*:\s*"([^"]*)"""", RegexOption.IGNORE_CASE)
 
+    /**
+     * Ba'zi playlistlar (ayniqsa sport kanallari) URL'ning o'zi ichida VLC
+     * uslubidagi "|User-Agent=...&Referer=..." qo'shimchasini beradi, masalan:
+     *   https://server.com/stream.m3u8|Referer=https://site.uz/&User-Agent=Mozilla/5.0
+     * Bu qo'shimchani ExoPlayer'ga XOM HAVOLA sifatida yuborsak, server javobini
+     * to'g'ri manifest deb tushuna olmaydi ("PARSING_MANIFEST_MALFORMED" xatosi
+     * aynan shundan kelib chiqadi) — chunki so'ralayotgan "manzil" aslida
+     * noto'g'ri, o'zining ichida sarlavha matni ham bor. Televizo va boshqa
+     * ko'plab pleyerlar buni ajratib oladi — biz ham xuddi shunday qilamiz.
+     */
+    private fun splitPipeUrl(rawUrl: String): Triple<String, String, String> {
+        val pipeIndex = rawUrl.indexOf('|')
+        if (pipeIndex < 0) return Triple(rawUrl, "", "")
+        val actualUrl = rawUrl.substring(0, pipeIndex).trim()
+        var userAgent = ""
+        var referer = ""
+        rawUrl.substring(pipeIndex + 1).split("&").forEach { pair ->
+            val kv = pair.split("=", limit = 2)
+            if (kv.size == 2) {
+                val value = try {
+                    java.net.URLDecoder.decode(kv[1].trim(), "UTF-8")
+                } catch (e: Exception) {
+                    kv[1].trim()
+                }
+                when (kv[0].trim().lowercase()) {
+                    "user-agent" -> userAgent = value
+                    "referer", "referrer" -> referer = value
+                }
+            }
+        }
+        return Triple(actualUrl, userAgent, referer)
+    }
+
     /** Blocking network fetch — call from a background thread. */
     fun fetch(playlistUrl: String): List<Channel> {
         val connection = URL(playlistUrl).openConnection() as HttpURLConnection
@@ -88,15 +121,16 @@ object M3UParser {
                 line.isNotEmpty() && !line.startsWith("#") -> {
                     val name = pendingName
                     if (name != null) {
+                        val (actualUrl, pipeUserAgent, pipeReferer) = splitPipeUrl(line)
                         channels.add(
                             Channel(
                                 name = name,
-                                url = line,
+                                url = actualUrl,
                                 logo = pendingLogo,
                                 group = pendingGroup,
                                 tvgId = pendingTvgId,
-                                userAgent = pendingUserAgent,
-                                referer = pendingReferer
+                                userAgent = pendingUserAgent.ifEmpty { pipeUserAgent },
+                                referer = pendingReferer.ifEmpty { pipeReferer }
                             )
                         )
                         resetPending()
