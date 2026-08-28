@@ -47,6 +47,15 @@ android {
         jvmTarget = '17'
     }
 
+    packagingOptions {
+        pickFirst "lib/*/libavcodec.so"
+        pickFirst "lib/*/libavutil.so"
+        pickFirst "lib/*/libavformat.so"
+        pickFirst "lib/*/libswresample.so"
+        pickFirst "lib/*/libswscale.so"
+        pickFirst "lib/*/libavfilter.so"
+    }
+
     buildFeatures {
         viewBinding true
     }

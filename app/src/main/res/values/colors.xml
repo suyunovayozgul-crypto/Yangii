@@ -12,4 +12,8 @@
     <color name="drawer_bg">#101317</color>
     <color name="overlay_bar">#CC0B0D0F</color>
     <color name="tab_selected_bg">#FFB020</color>
+    <color name="glass_panel">#33FFFFFF</color>
+    <color name="glass_border">#26FFFFFF</color>
+    <color name="glass_card">#1AFFFFFF</color>
+    <color name="glass_card_selected">#40FFB020</color>
 </resources>
