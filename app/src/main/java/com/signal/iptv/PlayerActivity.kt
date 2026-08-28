@@ -1191,7 +1191,7 @@ class PlayerActivity : AppCompatActivity() {
         // Shu qadar vaqt ichida kanal STATE_READY'ga yetmasa — "abadiy
         // yuklanadigan" o'lik oqim deb qabul qilinadi va tiklash zanjiri
         // qo'lda ishga tushiriladi.
-        private const val OPEN_TIMEOUT_MS = 12_000L
+        private const val OPEN_TIMEOUT_MS = 30_000L
         private val timeFormat = SimpleDateFormat("HH:mm", Locale.US)
     }
 }
