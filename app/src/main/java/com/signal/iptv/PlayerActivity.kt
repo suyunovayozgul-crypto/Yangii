@@ -89,16 +89,16 @@ class PlayerActivity : AppCompatActivity() {
     private var hardRecoverAttempted = false
     private var lastErrorMessage: String = ""
 
-    // Playlist ba'zi kanallar uchun Referer ko'rsatmagan bo'lsa, preparePlayback()
-    // shu kanalning o'z domenidan sun'iy Referer/Origin "taxmin qiladi" (pastda,
-    // deriveReferer()). Ba'zi serverlarda bu taxmin TO'G'RI kelmaydi — ular hech
-    // qanday Referer yubormagan so'rovni kutadi (yoki butunlay boshqasini), va
-    // sun'iy sarlavha aynan O'ZI 403/rad etilishga sabab bo'ladi. Bitta havola
-    // televizorda ochilib, telefonda ochilmasligining odatiy sababi shu — TV
-    // tomondagi pleyer bu Referer'ni umuman yubormaydi. Shu bayroq orqali:
-    // birinchi urinish sun'iy Referer bilan, agar shu urinish muvaffaqiyatsiz
-    // bo'lsa — Referer'siz qayta uriniladi (retryCount hisobidan tashqarida).
-    private var suppressAutoReferer = false
+    // Playlist ba'zi kanallar uchun Referer ko'rsatmagan bo'lsa, ExoPlayer buni
+    // avtomatik "taxmin qilishi" kerak — lekin BITTA taxmin (masalan, oqimning
+    // o'z domeni) har doim to'g'ri kelavermaydi: ba'zi serverlar (oktv.uz kabi)
+    // playlist joylashgan "portal" saytini kutadi, ba'zilari umuman hech qanday
+    // Referer kutmaydi. Shuning uchun bir nechta variantni NAVBAT bilan sinab
+    // ko'ramiz — refererAttemptIndex shu navbatdagi o'rinni bildiradi va har bir
+    // muvaffaqiyatsiz urinishdan keyin (retryCount hisobiga kirmasdan) bittaga
+    // oshiriladi, referererCandidates() ro'yxati tugagach oddiy qayta urinish
+    // zanjiriga (softRetry/hardRecover) o'tadi.
+    private var refererAttemptIndex = 0
 
     // === "Abadiy yuklanish" qo'riqchisi ===
     // Ba'zi o'lik/geo-blok qilingan IPTV serverlar ulanishni na xato beradi,
@@ -428,12 +428,14 @@ class PlayerActivity : AppCompatActivity() {
      */
     private fun handlePlaybackError() {
         val channel = currentChannel ?: return
-        // Agar shu urinishda sun'iy (taxmin qilingan) Referer yuborilgan bo'lsa —
-        // avval buni o'chirib, darhol (retryCount hisobiga kirmasdan) qayta
-        // uriniladi. Ko'p hollarda muammo aynan shu noto'g'ri taxmin qilingan
-        // Referer/Origin bo'ladi — server buni "bot"likka o'xshab rad etadi.
-        if (!suppressAutoReferer && channel.referer.isBlank()) {
-            suppressAutoReferer = true
+        // Referer variantlari hali tugamagan bo'lsa — keyingisini darhol
+        // (retryCount hisobiga kirmasdan) sinab ko'ramiz. Ko'p hollarda muammo
+        // aynan noto'g'ri taxmin qilingan Referer/Origin bo'ladi — server buni
+        // "bot"likka o'xshab rad etib, HTML xato sahifasini qaytaradi (bu esa
+        // "buzilgan manifest" xatosiga olib keladi).
+        val candidateCount = refererCandidates(channel).size
+        if (refererAttemptIndex < candidateCount - 1) {
+            refererAttemptIndex++
             statusHint(getString(R.string.stream_reconnecting))
             mainHandler.postDelayed({ preparePlayback(channel) }, 500L)
             return
@@ -496,28 +498,35 @@ class PlayerActivity : AppCompatActivity() {
      * yuboramiz — bu ko'plab "faqat brauzerdan kelayotganday" tekshiruvni
      * chetlab o'tadi (Televizo va boshqa ilovalar ham aynan shunday qiladi).
      */
-    private fun deriveReferer(channel: Channel): String {
-        if (channel.referer.isNotBlank()) return channel.referer
-        return try {
+    /**
+     * Sinab ko'riladigan Referer variantlari, eng ehtimolidan boshlab:
+     *   1) Playlist o'zi ko'rsatgan Referer (bo'lsa) — eng ishonchli.
+     *   2) Playlist joylashgan "portal" domeni (masalan mirovoytv.uz) — ko'plab
+     *      IPTV-provayderlar aynan shu saytga sotilgan/ulangan bo'ladi va
+     *      Referer sifatida shuni kutadi (oqimning o'z domeni EMAS).
+     *   3) Oqimning o'z domeni — ba'zi boshqa provayderlar buni kutadi.
+     *   4) Referer'siz — ba'zi serverlar hech qanday Referer kutmaydi.
+     */
+    private fun refererCandidates(channel: Channel): List<String> {
+        val list = mutableListOf<String>()
+        if (channel.referer.isNotBlank()) list.add(channel.referer)
+        try {
+            val portalUri = android.net.Uri.parse(MainActivity.PLAYLIST_URL)
+            list.add("${portalUri.scheme}://${portalUri.host}/")
+        } catch (e: Exception) { /* e'tiborsiz qoldiriladi */ }
+        try {
             val uri = android.net.Uri.parse(channel.url)
-            "${uri.scheme}://${uri.host}/"
-        } catch (e: Exception) {
-            ""
-        }
+            list.add("${uri.scheme}://${uri.host}/")
+        } catch (e: Exception) { /* e'tiborsiz qoldiriladi */ }
+        list.add("")
+        return list.distinct()
     }
 
     private fun preparePlayback(channel: Channel) {
         val exoPlayer = player ?: return
         val userAgent = channel.userAgent.ifBlank { M3UParser.BROWSER_USER_AGENT }
-        // Playlist o'zi Referer ko'rsatgan bo'lsa (channel.referer) — bu ishonchli,
-        // har doim yuboriladi. Lekin sun'iy taxmin qilingan Referer (deriveReferer())
-        // faqat suppressAutoReferer=false bo'lganda qo'shiladi — birinchi urinish
-        // muvaffaqiyatsiz bo'lsa, handlePlaybackError() buni o'chirib qayta uradi.
-        val referer = if (channel.referer.isNotBlank() || !suppressAutoReferer) {
-            deriveReferer(channel)
-        } else {
-            ""
-        }
+        val candidates = refererCandidates(channel)
+        val referer = candidates[refererAttemptIndex.coerceIn(0, candidates.size - 1)]
         val httpFactory = OkHttpDataSource.Factory(okHttpClient)
             .setUserAgent(userAgent)
         if (referer.isNotBlank()) {
@@ -752,7 +761,7 @@ class PlayerActivity : AppCompatActivity() {
         currentChannel = channel
         retryCount = 0
         hardRecoverAttempted = false
-        suppressAutoReferer = false
+        refererAttemptIndex = 0
         hideStreamError()
         titleView.text = channel.name
         updateProgramLabel()
