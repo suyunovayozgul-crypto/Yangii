@@ -29,7 +29,6 @@ class MainActivity : AppCompatActivity() {
     companion object {
         const val PLAYLIST_URL = "https://mirovoytv.uz/playlists/3c874d1e.m3u"
         const val TELEGRAM_URL = "https://t.me/mirovoytvuz"
-        const val EPG_URL = "https://iptvx.one/epg/epg_lite.xml.gz"
         private const val EPG_ROW_REFRESH_MS = 60_000L
     }
 
@@ -43,13 +42,14 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var drawerLayout: DrawerLayout
     private lateinit var toolbar: Toolbar
+    private lateinit var toolbarSubtitle: TextView
     private lateinit var tabsRow: LinearLayout
     private lateinit var recyclerView: RecyclerView
     private lateinit var statusText: TextView
     private lateinit var searchBox: EditText
     private lateinit var swipeRefresh: SwipeRefreshLayout
-    private lateinit var drawerCategories: LinearLayout
     private lateinit var adapter: ChannelAdapter
+    private var lastEpgUrl: String = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -57,12 +57,12 @@ class MainActivity : AppCompatActivity() {
 
         drawerLayout = findViewById(R.id.drawerLayout)
         toolbar = findViewById(R.id.toolbar)
+        toolbarSubtitle = findViewById(R.id.toolbarSubtitle)
         tabsRow = findViewById(R.id.tabsRow)
         recyclerView = findViewById(R.id.channelList)
         statusText = findViewById(R.id.statusText)
         searchBox = findViewById(R.id.searchBox)
         swipeRefresh = findViewById(R.id.swipeRefresh)
-        drawerCategories = findViewById(R.id.drawerCategories)
 
         setSupportActionBar(toolbar)
         supportActionBar?.setDisplayShowTitleEnabled(false)
@@ -91,16 +91,19 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
 
+        // MUHIM (qayta dizayn): avval Telegram/Ma'lumot/Sozlamalar FAQAT
+        // hamburger menyu ichida yashiringan edi. Endi shu 3 ta amal to'g'ridan-
+        // to'g'ri yuqori panelda ham bor — foydalanuvchi menyuni ochmasdan ham
+        // bir bosishda yeta oladi. Drawer ichidagi bir xil qatorlar orqa
+        // muvofiqlik/tanish odat uchun saqlab qolindi.
+        findViewById<View>(R.id.toolbarTelegramBtn).setOnClickListener { openTelegram() }
+        findViewById<View>(R.id.toolbarAboutBtn).setOnClickListener { showAbout() }
+        findViewById<View>(R.id.toolbarSettingsBtn).setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }
+
         adapter = ChannelAdapter(emptyList()) { channel, _ ->
-            val intent = Intent(this, PlayerActivity::class.java)
-            intent.putExtra("channel_name", channel.name)
-            intent.putExtra("channel_url", channel.url)
-            intent.putExtra("channel_group", channel.group)
-            intent.putExtra("channel_tvgid", channel.tvgId)
-            intent.putExtra("channel_logo", channel.logo)
-            intent.putExtra("channel_useragent", channel.userAgent)
-            intent.putExtra("channel_referrer", channel.referrer)
-            startActivity(intent)
+            startActivity(channelIntent(channel))
         }
         recyclerView.layoutManager = LinearLayoutManager(this)
         recyclerView.adapter = adapter
@@ -117,8 +120,21 @@ class MainActivity : AppCompatActivity() {
         })
 
         fetchPlaylist()
-        EpgRepository.ensureLoaded(EPG_URL) { adapter.refreshEpgRows() }
+        loadEpg()
         startEpgRowRefreshLoop()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Foydalanuvchi Sozlamalar ekranidan EPG havolasini o'zgartirib qaytgan
+        // bo'lishi mumkin — shunday bo'lsa, darhol yangi manbadan qayta yuklaymiz.
+        val current = AppPrefs.epgUrl(this)
+        if (current != lastEpgUrl) loadEpg()
+    }
+
+    private fun loadEpg() {
+        lastEpgUrl = AppPrefs.epgUrl(this)
+        EpgRepository.ensureLoaded(lastEpgUrl) { adapter.refreshEpgRows() }
     }
 
     /** Periodically re-binds visible rows so "Hozir: ..." stays in sync as programmes change. */
@@ -131,9 +147,6 @@ class MainActivity : AppCompatActivity() {
         }, EPG_ROW_REFRESH_MS)
     }
 
-    private var fetchRetryCount = 0
-    private val fetchRetryDelaysMs = longArrayOf(2000, 4000, 8000, 15000, 30000)
-
     private fun fetchPlaylist() {
         statusText.visibility = View.VISIBLE
         statusText.text = getString(R.string.loading)
@@ -142,56 +155,28 @@ class MainActivity : AppCompatActivity() {
         executor.execute {
             try {
                 val channels = M3UParser.fetch(PLAYLIST_URL)
-                mainHandler.post {
-                    fetchRetryCount = 0
-                    onLoaded(channels)
-                }
+                mainHandler.post { onLoaded(channels) }
             } catch (e: Exception) {
-                mainHandler.post { onFetchFailed(e) }
+                mainHandler.post {
+                    swipeRefresh.isRefreshing = false
+                    statusText.visibility = View.VISIBLE
+                    recyclerView.visibility = View.GONE
+                    statusText.text = getString(R.string.load_error, e.message ?: "")
+                }
             }
-        }
-    }
-
-    /**
-     * MUHIM: avval bitta urinish muvaffaqiyatsiz bo'lsa, kanallar ro'yxati
-     * abadiy bo'sh qolar edi ("kanallar ko'rinmay qoldi" holati aynan shundan
-     * kelib chiqqan) — endi internet birozgina qoqilib qolsa ham, ilova bir
-     * necha marta, ortib boruvchi kutish bilan, o'zi qayta urinadi.
-     */
-    private fun onFetchFailed(e: Exception) {
-        swipeRefresh.isRefreshing = false
-        if (fetchRetryCount < fetchRetryDelaysMs.size) {
-            val delay = fetchRetryDelaysMs[fetchRetryCount]
-            fetchRetryCount++
-            statusText.visibility = View.VISIBLE
-            recyclerView.visibility = View.GONE
-            statusText.text = getString(R.string.loading)
-            mainHandler.postDelayed({ fetchPlaylist() }, delay)
-        } else {
-            statusText.visibility = View.VISIBLE
-            recyclerView.visibility = View.GONE
-            statusText.text = getString(R.string.load_error, e.message ?: "")
         }
     }
 
     private fun onLoaded(channels: List<Channel>) {
         swipeRefresh.isRefreshing = false
-        // Agar server internet uzilishi sabab to'liqsiz (juda qisqa) ro'yxat
-        // yuborsa — buni haqiqiy yangilanish deb qabul qilmaymiz, chunki bu
-        // "kanallar birdan yo'qolib qoladi" holatining aynan o'zi. Eskisini
-        // saqlab qolamiz va qayta urinamiz.
-        if (allChannels.isNotEmpty() && channels.size < allChannels.size / 2) {
-            onFetchFailed(Exception("Incomplete playlist (${channels.size}/${allChannels.size})"))
-            return
-        }
         allChannels = channels
+        toolbarSubtitle.text = getString(R.string.channel_count_subtitle, channels.size)
         categories = channels.map { it.group.trim() }
             .filter { it.isNotEmpty() }
             .distinct()
             .sorted()
 
         buildTabs()
-        buildDrawerCategories()
         applyFilter()
     }
 
@@ -233,34 +218,10 @@ class MainActivity : AppCompatActivity() {
         return btn
     }
 
-    private fun buildDrawerCategories() {
-        drawerCategories.removeAllViews()
-        categories.forEach { cat ->
-            val row = TextView(this)
-            row.text = cat.uppercase()
-            row.textSize = 13f
-            row.setPadding(60, 24, 20, 24)
-            row.setTextColor(
-                ContextCompat.getColor(this, if (currentCategory == cat) R.color.amber else R.color.text)
-            )
-            val outValue = android.util.TypedValue()
-            theme.resolveAttribute(android.R.attr.selectableItemBackground, outValue, true)
-            row.setBackgroundResource(outValue.resourceId)
-            row.isClickable = true
-            row.isFocusable = true
-            row.setOnClickListener {
-                selectCategory(cat)
-                drawerLayout.closeDrawers()
-            }
-            drawerCategories.addView(row)
-        }
-    }
-
     private fun selectCategory(cat: String?) {
         if (currentCategory == cat) return
         currentCategory = cat
         buildTabs()
-        buildDrawerCategories()
         applyFilter()
     }
 
@@ -285,6 +246,26 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * MUHIM: avval bu yerda faqat channel_name/channel_url uzatilardi — shu
+     * sababli PlayerActivity ochilganda kanalning tvg-id'i yo'qolib qolar edi
+     * va aynan asosiy ro'yxatdan ochilgan kanal uchun EPG hech qachon
+     * ko'rinmas edi (faqat pleyer ichidagi kanal almashtirishda EPG ishlardi,
+     * chunki u yerda to'liq Channel obyekti to'g'ridan-to'g'ri uzatiladi).
+     * Endi tvg-id, logo, guruh va maxsus User-Agent/Referer ham uzatiladi.
+     */
+    private fun channelIntent(channel: Channel): Intent {
+        val intent = Intent(this, PlayerActivity::class.java)
+        intent.putExtra("channel_name", channel.name)
+        intent.putExtra("channel_url", channel.url)
+        intent.putExtra("channel_logo", channel.logo)
+        intent.putExtra("channel_group", channel.group)
+        intent.putExtra("channel_tvg_id", channel.tvgId)
+        intent.putExtra("channel_user_agent", channel.userAgent)
+        intent.putExtra("channel_referer", channel.referer)
+        return intent
+    }
+
     private fun openTelegram() {
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(TELEGRAM_URL))
         startActivity(intent)
@@ -303,14 +284,6 @@ class MainActivity : AppCompatActivity() {
             drawerLayout.closeDrawers()
         } else {
             super.onBackPressed()
-        }
-    }
-
-    /** Ilova fonga ketib qaytganda ro'yxat bo'sh qolib ketgan bo'lsa — qayta yuklaymiz. */
-    override fun onResume() {
-        super.onResume()
-        if (allChannels.isEmpty() && fetchRetryCount == 0) {
-            fetchPlaylist()
         }
     }
 

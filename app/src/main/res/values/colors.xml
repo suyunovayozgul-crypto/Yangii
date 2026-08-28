@@ -12,4 +12,15 @@
     <color name="drawer_bg">#101317</color>
     <color name="overlay_bar">#CC0B0D0F</color>
     <color name="tab_selected_bg">#FFB020</color>
+
+    <!-- "Shisha" (glass) panel — kanal ro'yxati endi qattiq bir xil rangli
+         panel emas, balki video/orqa fon ustiga suzib chiqadigan yarim
+         shaffof panel bo'ladi (OwnTV'dagi ChannelListOverlay uslubiga
+         o'xshash) — bu ilgarigi drawerdan butunlay boshqa ko'rinish beradi. -->
+    <color name="glass_panel">#E6121620</color>
+    <color name="glass_panel_top">#F2161B27</color>
+    <color name="glass_card">#141822</color>
+    <color name="glass_card_selected">#241C0E</color>
+    <color name="glass_border">#2A3038</color>
+    <color name="progress_track">#2A2E35</color>
 </resources>

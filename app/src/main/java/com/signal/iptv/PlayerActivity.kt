@@ -8,7 +8,7 @@ import android.os.Looper
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.GestureDetector
-
+import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
@@ -24,12 +24,13 @@ import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.drawerlayout.widget.DrawerLayout
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
-import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -40,34 +41,18 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.NextRenderersFactory
 import androidx.media3.exoplayer.DefaultRenderersFactory
-import okhttp3.OkHttpClient
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 
 class PlayerActivity : AppCompatActivity() {
 
     private var player: ExoPlayer? = null
     private lateinit var trackSelector: DefaultTrackSelector
+    private lateinit var httpDataSourceFactory: DefaultHttpDataSource.Factory
     private val executor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
-
-    // OkHttp mijozi bitta marta yaratiladi va barcha kanallar (va qayta
-    // urinishlar) uchun qayta ishlatiladi — ulanish poolini saqlab qolish
-    // uchun bu muhim, har safar yangi OkHttpClient yaratish bu afzallikni
-    // yo'qqa chiqaradi.
-    private val okHttpClient: OkHttpClient by lazy {
-        OkHttpClient.Builder()
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(15, TimeUnit.SECONDS)
-            .writeTimeout(15, TimeUnit.SECONDS)
-            .followRedirects(true)
-            .followSslRedirects(true)
-            .retryOnConnectionFailure(true)
-            .build()
-    }
 
     private var allChannels: List<Channel> = emptyList()
     private var categories: List<String> = emptyList()
@@ -85,18 +70,6 @@ class PlayerActivity : AppCompatActivity() {
     // ham yordam bermasa, foydalanuvchiga "Qayta urinish" tugmasi ko'rsatiladi.
     private var retryCount: Int = 0
     private var hardRecoverAttempted = false
-
-    // === "Abadiy yuklanish" qo'riqchisi ===
-    // Ba'zi o'lik/geo-blok qilingan IPTV serverlar ulanishni na xato beradi,
-    // na yopadi — shunchaki hech narsa yubormay, cheksiz "buffering" holatida
-    // ushlab turadi. Bunday holatda ExoPlayer'ning onPlayerError() HECH QACHON
-    // chaqirilmaydi, shuning uchun pastdagi butun qayta urinish zanjiri
-    // ishga tushmay qoladi — aynan shu "qora ekran, abadiy yuklanadi" holatiga
-    // sabab bo'lgan joy. Yechim: prepare() chaqirilganda mustaqil taymer
-    // boshlaymiz; agar OPEN_TIMEOUT_MS ichida STATE_READY'ga yetmasa — buni
-    // xuddi xatolik kelgandek qabul qilib, xuddi shu tiklash zanjirini
-    // qo'lda ishga tushiramiz.
-    private var openWatchdogRunnable: Runnable? = null
     private val maxSoftRetries: Int = 2
 
     // Ekran to'ldirish rejimlari orasida aylanish (kichik/katta ekran).
@@ -108,7 +81,7 @@ class PlayerActivity : AppCompatActivity() {
     private var resizeModeIndex = 0
     private var isLandscape = true
 
-    private lateinit var channelsOverlay: View
+    private lateinit var drawerLayout: DrawerLayout
     private lateinit var playerView: PlayerView
     private lateinit var overlayGroup: View
     private lateinit var titleView: TextView
@@ -118,7 +91,7 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var streamErrorView: TextView
     private lateinit var retryBtn: Button
     private lateinit var resizeLabel: TextView
-    private lateinit var categoryRail: LinearLayout
+    private lateinit var tabsRow: LinearLayout
     private lateinit var searchBox: EditText
     private lateinit var statusText: TextView
     private lateinit var channelRecycler: RecyclerView
@@ -142,36 +115,6 @@ class PlayerActivity : AppCompatActivity() {
         }
     }
 
-    // "Muzlab qolish" qo'riqchisi: ba'zi bepul IPTV serverlari oqimni jim
-    // to'xtatib qo'yadi — ExoPlayer xato bermaydi, shunchaki pozitsiya
-    // ilgarilamay qoladi. Shu tekshiruv har WATCHDOG_INTERVAL_MS'da bir marta
-    // pozitsiyani solishtiradi; agar ijro davom etayotgan bo'lsa-yu, pozitsiya
-    // qotib qolgan bo'lsa — kanalni jimgina qayta yuklaydi.
-    private var lastWatchdogPosition = -1L
-    private var lastWatchdogUnchangedCount = 0
-    private val stallWatchdogRunnable = object : Runnable {
-        override fun run() {
-            val exoPlayer = player
-            val channel = currentChannel
-            if (exoPlayer != null && channel != null && exoPlayer.playWhenReady &&
-                exoPlayer.playbackState != Player.STATE_IDLE
-            ) {
-                val position = exoPlayer.currentPosition
-                if (position == lastWatchdogPosition) {
-                    lastWatchdogUnchangedCount++
-                    if (lastWatchdogUnchangedCount >= 2) {
-                        lastWatchdogUnchangedCount = 0
-                        preparePlayback(channel)
-                    }
-                } else {
-                    lastWatchdogUnchangedCount = 0
-                }
-                lastWatchdogPosition = position
-            }
-            mainHandler.postDelayed(this, WATCHDOG_INTERVAL_MS)
-        }
-    }
-
     private val hideResizeLabelRunnable = Runnable {
         resizeLabel.animate().alpha(0f).setDuration(200).withEndAction {
             resizeLabel.visibility = View.GONE
@@ -191,25 +134,17 @@ class PlayerActivity : AppCompatActivity() {
 
         val name = intent.getStringExtra("channel_name") ?: ""
         val url = intent.getStringExtra("channel_url") ?: ""
-        // To'liq kanal ma'lumoti (tvg-id, logo, maxsus sarlavhalar) MainActivity'dan
-        // shu extra'lar orqali keladi — faqat nom/url o'tkazilsa, birinchi ochilgan
-        // kanalning EPG'i va maxsus User-Agent/Referer'i ishlamay qolar edi.
-        val initialChannel = Channel(
-            name = name,
-            url = url,
-            logo = intent.getStringExtra("channel_logo") ?: "",
-            group = intent.getStringExtra("channel_group") ?: "",
-            tvgId = intent.getStringExtra("channel_tvgid") ?: "",
-            userAgent = intent.getStringExtra("channel_useragent") ?: "",
-            referrer = intent.getStringExtra("channel_referrer") ?: ""
-        )
+        // MUHIM: avval faqat nom/url uzatilar edi — tvg-id yo'qolgani sababli
+        // ro'yxatdan to'g'ridan-to'g'ri ochilgan kanal uchun EPG hech qachon
+        // ko'rinmasdi. Endi MainActivity to'liq ma'lumotni (tvg-id, logo,
+        // guruh, maxsus User-Agent/Referer) ham uzatadi.
+        val initialLogo = intent.getStringExtra("channel_logo") ?: ""
+        val initialGroup = intent.getStringExtra("channel_group") ?: ""
+        val initialTvgId = intent.getStringExtra("channel_tvg_id") ?: ""
+        val initialUserAgent = intent.getStringExtra("channel_user_agent") ?: ""
+        val initialReferer = intent.getStringExtra("channel_referer") ?: ""
 
-        // MUHIM: ekran bir necha daqiqadan keyin o'zi o'chib/qulflanib qolsa,
-        // video to'xtab, "barcha kanallar ishlamay qoldi" holatiga olib kelardi.
-        // Shu bayroq bilan bu ekranda turgan vaqtda ekran hech qachon o'chmaydi.
-        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-
-        channelsOverlay = findViewById(R.id.channelsOverlay)
+        drawerLayout = findViewById(R.id.playerDrawerLayout)
         playerView = findViewById(R.id.playerView)
         overlayGroup = findViewById(R.id.overlayGroup)
         titleView = findViewById(R.id.playerTitle)
@@ -220,7 +155,7 @@ class PlayerActivity : AppCompatActivity() {
         retryBtn = findViewById(R.id.playerRetryBtn)
         retryBtn.stateListAnimator = null
         resizeLabel = findViewById(R.id.playerResizeLabel)
-        categoryRail = findViewById(R.id.categoryRail)
+        tabsRow = findViewById(R.id.playerTabsRow)
         searchBox = findViewById(R.id.playerSearchBox)
         statusText = findViewById(R.id.playerStatusText)
         channelRecycler = findViewById(R.id.playerChannelList)
@@ -230,11 +165,8 @@ class PlayerActivity : AppCompatActivity() {
 
         findViewById<ImageButton>(R.id.playerBackBtn).setOnClickListener { finish() }
         findViewById<ImageButton>(R.id.playerChannelsBtn).setOnClickListener {
-            openChannelsOverlay()
+            drawerLayout.openDrawer(Gravity.END)
             keepOverlayVisible()
-        }
-        findViewById<ImageButton>(R.id.channelsCloseBtn).setOnClickListener {
-            closeChannelsOverlay()
         }
         findViewById<ImageButton>(R.id.playerResizeBtn).setOnClickListener {
             cycleResizeMode()
@@ -271,7 +203,7 @@ class PlayerActivity : AppCompatActivity() {
 
         adapter = ChannelAdapter(emptyList()) { channel, _ ->
             playChannel(channel)
-            closeChannelsOverlay()
+            drawerLayout.closeDrawers()
         }
         channelRecycler.layoutManager = LinearLayoutManager(this)
         channelRecycler.adapter = adapter
@@ -287,11 +219,21 @@ class PlayerActivity : AppCompatActivity() {
 
         setupPlayer()
         setupGestures()
-        playChannel(initialChannel)
+        playChannel(
+            Channel(
+                name = name,
+                url = url,
+                logo = initialLogo,
+                group = initialGroup,
+                tvgId = initialTvgId,
+                userAgent = initialUserAgent,
+                referer = initialReferer
+            )
+        )
         loadChannelsForDrawer()
         scheduleAutoHide()
 
-        EpgRepository.ensureLoaded(MainActivity.EPG_URL) {
+        EpgRepository.ensureLoaded(AppPrefs.epgUrl(this)) {
             updateProgramLabel()
             adapter.refreshEpgRows()
         }
@@ -302,15 +244,16 @@ class PlayerActivity : AppCompatActivity() {
     private fun setupPlayer() {
         // Ko'p bepul IPTV serverlari ExoPlayer'ning standart so'rovini
         // (User-Agent'siz yoki noma'lum User-Agent bilan) rad etadi —
-        // brauzerga o'xshash User-Agent va uzunroq timeout beramiz. OkHttp
-        // orqali yuboramiz — Televizo kabi ilovalar bilan bir xil tarmoq
-        // uslubi, ba'zi serverlar oddiy HttpURLConnection'ni sukut bilan
-        // rad etadi.
-        val httpDataSourceFactory = OkHttpDataSource.Factory(okHttpClient)
-            .setUserAgent(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-                    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-            )
+        // brauzerga o'xshash User-Agent va uzunroq timeout beramiz. Bu factory
+        // instance darajasida saqlanadi (httpDataSourceFactory) — shunda har
+        // safar kanal almashganda applyChannelHeaders() uni yangi qiymatlar
+        // bilan yangilay oladi, playerni butunlay qayta yaratmasdan.
+        httpDataSourceFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent(DEFAULT_USER_AGENT)
+            .setConnectTimeoutMs(15000)
+            .setReadTimeoutMs(15000)
+            .setAllowCrossProtocolRedirects(true)
+        currentChannel?.let { applyChannelHeaders(it) }
 
         val mediaSourceFactory = DefaultMediaSourceFactory(this)
             .setDataSourceFactory(httpDataSourceFactory)
@@ -351,22 +294,32 @@ class PlayerActivity : AppCompatActivity() {
                 handlePlaybackError()
             }
 
-            override fun onPlaybackStateChanged(playbackState: Int) {
-                if (playbackState == Player.STATE_READY) {
-                    cancelOpenWatchdog()
-                }
-            }
-
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying) {
                     retryCount = 0
                     hardRecoverAttempted = false
                     hideStreamError()
-                    cancelOpenWatchdog()
                 }
                 updatePlayPauseIcon()
             }
         })
+    }
+
+    /**
+     * Ba'zi kanallar (playlistda #EXTVLCOPT bilan belgilangan) o'ziga xos
+     * User-Agent yoki Referer talab qiladi — shusiz server ularni rad etadi.
+     * Aynan shu holat "boshqa dasturda ochyapti, bunda ochmayapti" shikoyatining
+     * asosiy sabablaridan biri bo'lishi mumkin edi, chunki avval bu ilova
+     * har doim bitta qattiq yozilgan brauzer User-Agent'idan foydalanardi va
+     * Referer umuman yubormasdi. Player butunlay qayta yaratilmasdan, shu
+     * factory'ning qiymatlarini har safar kanal almashganda yangilaymiz.
+     */
+    private fun applyChannelHeaders(channel: Channel) {
+        val userAgent = channel.userAgent.ifBlank { DEFAULT_USER_AGENT }
+        httpDataSourceFactory.setUserAgent(userAgent)
+        val extraHeaders = mutableMapOf<String, String>()
+        if (channel.referer.isNotBlank()) extraHeaders["Referer"] = channel.referer
+        httpDataSourceFactory.setDefaultRequestProperties(extraHeaders)
     }
 
     /**
@@ -392,7 +345,13 @@ class PlayerActivity : AppCompatActivity() {
 
     private fun softRetry() {
         val channel = currentChannel ?: return
-        preparePlayback(channel)
+        val exoPlayer = player ?: return
+        applyChannelHeaders(channel)
+        exoPlayer.stop()
+        exoPlayer.clearMediaItems()
+        exoPlayer.setMediaItem(MediaItem.fromUri(channel.url))
+        exoPlayer.prepare()
+        exoPlayer.playWhenReady = true
     }
 
     /** Avtomatik, foydalanuvchiga ko'rinmaydigan to'liq playerni qayta yaratish. */
@@ -401,7 +360,11 @@ class PlayerActivity : AppCompatActivity() {
         setupPlayer()
         retryCount = 0
         val channel = currentChannel ?: return
-        preparePlayback(channel)
+        val exoPlayer = player ?: return
+        applyChannelHeaders(channel)
+        exoPlayer.setMediaItem(MediaItem.fromUri(channel.url))
+        exoPlayer.prepare()
+        exoPlayer.playWhenReady = true
         updatePlayPauseIcon()
     }
 
@@ -413,83 +376,12 @@ class PlayerActivity : AppCompatActivity() {
         player?.release()
         setupPlayer()
         val channel = currentChannel ?: return
-        preparePlayback(channel)
-        updatePlayPauseIcon()
-    }
-
-    /**
-     * Har bir kanal uchun media manbasini ALOHIDA quramiz (umumiy bitta
-     * DataSource.Factory o'rniga) — chunki ba'zi IPTV serverlar faqat playlist
-     * shu kanal uchun ko'rsatgan maxsus User-Agent yoki Referer bilan kelgan
-     * so'rovlarni qabul qiladi (#EXTVLCOPT yoki url|User-Agent=...&Referer=...
-     * ko'rinishida beriladi). Boshqa ilova (masalan Televizo) xuddi shu
-     * sarlavhalarni o'qib yuboradi, biz ham xuddi shunday qilishimiz kerak —
-     * aks holda o'sha kanal umuman ochilmaydi, garchi oqimning o'zi ishlab
-     * turgan bo'lsa ham.
-     */
-    /**
-     * Ko'p bepul IPTV serverlari (masalan oktv.uz kabi) so'rov Referer/Origin
-     * sarlavhalarisiz kelsa — 403 bilan rad etadi, garchi User-Agent to'g'ri
-     * bo'lsa ham. Playlist o'zi Referer ko'rsatmagan bo'lsa, kanalning O'Z
-     * domenidan (masalan https://ru.oktv.uz/) sun'iy Referer/Origin yasab
-     * yuboramiz — bu ko'plab "faqat brauzerdan kelayotganday" tekshiruvni
-     * chetlab o'tadi (Televizo va boshqa ilovalar ham aynan shunday qiladi).
-     */
-    private fun deriveReferer(channel: Channel): String {
-        if (channel.referrer.isNotBlank()) return channel.referrer
-        return try {
-            val uri = android.net.Uri.parse(channel.url)
-            "${uri.scheme}://${uri.host}/"
-        } catch (e: Exception) {
-            ""
-        }
-    }
-
-    private fun preparePlayback(channel: Channel) {
         val exoPlayer = player ?: return
-        val userAgent = channel.userAgent.ifBlank { M3UParser.BROWSER_USER_AGENT }
-        val referer = deriveReferer(channel)
-        val httpFactory = OkHttpDataSource.Factory(okHttpClient)
-            .setUserAgent(userAgent)
-        if (referer.isNotBlank()) {
-            httpFactory.setDefaultRequestProperties(
-                mapOf("Referer" to referer, "Origin" to referer.trimEnd('/'))
-            )
-        }
-        val mediaSource = DefaultMediaSourceFactory(httpFactory)
-            .createMediaSource(MediaItem.fromUri(channel.url))
-
-        exoPlayer.stop()
-        exoPlayer.clearMediaItems()
-        exoPlayer.setMediaSource(mediaSource)
+        applyChannelHeaders(channel)
+        exoPlayer.setMediaItem(MediaItem.fromUri(channel.url))
         exoPlayer.prepare()
         exoPlayer.playWhenReady = true
-        scheduleOpenWatchdog(channel)
-    }
-
-    /**
-     * Agar OPEN_TIMEOUT_MS ichida shu kanal STATE_READY'ga yetmasa — bu
-     * "abadiy yuklanadigan" o'lik oqim degani. ExoPlayer o'zi xato bermasa ham,
-     * xuddi xatolik kelgandek qayta tiklash zanjirini (softRetry → hardRecover
-     * → xato ko'rsatish) qo'lda ishga tushiramiz.
-     */
-    private fun scheduleOpenWatchdog(channel: Channel) {
-        cancelOpenWatchdog()
-        val runnable = Runnable {
-            val exoPlayer = player
-            if (exoPlayer != null && currentChannel?.url == channel.url &&
-                exoPlayer.playbackState != Player.STATE_READY
-            ) {
-                handlePlaybackError()
-            }
-        }
-        openWatchdogRunnable = runnable
-        mainHandler.postDelayed(runnable, OPEN_TIMEOUT_MS)
-    }
-
-    private fun cancelOpenWatchdog() {
-        openWatchdogRunnable?.let { mainHandler.removeCallbacks(it) }
-        openWatchdogRunnable = null
+        updatePlayPauseIcon()
     }
 
     private fun statusHint(text: String) {
@@ -544,18 +436,6 @@ class PlayerActivity : AppCompatActivity() {
         }
     }
 
-    // === Kanallar to'liq ekran paneli ===
-
-    private fun openChannelsOverlay() {
-        channelsOverlay.visibility = View.VISIBLE
-    }
-
-    private fun closeChannelsOverlay() {
-        channelsOverlay.visibility = View.GONE
-    }
-
-    private fun isChannelsOverlayOpen(): Boolean = channelsOverlay.visibility == View.VISIBLE
-
     // === Overlay ko'rsatish / yashirish ===
 
     private fun setOverlayVisible(visible: Boolean) {
@@ -599,7 +479,7 @@ class PlayerActivity : AppCompatActivity() {
      * yopiq bo'lganda ishlaydi, aks holda pult ro'yxat ichida yurishi kerak.
      */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (event.action == KeyEvent.ACTION_DOWN && !isChannelsOverlayOpen()) {
+        if (event.action == KeyEvent.ACTION_DOWN && !drawerLayout.isDrawerOpen(Gravity.END)) {
             when (event.keyCode) {
                 // Pultdagi maxsus Channel+/- tugmalari har doim to'g'ridan-to'g'ri
                 // kanal almashtiradi — overlay ko'rinsin yoki yo'q, farqi yo'q.
@@ -686,11 +566,17 @@ class PlayerActivity : AppCompatActivity() {
         titleView.text = channel.name
         updateProgramLabel()
         statsView.visibility = View.GONE
+        val exoPlayer = player ?: return
+        applyChannelHeaders(channel)
         // Eski oqimni to'liq to'xtatib, media ro'yxatini tozalab, keyin yangisini
         // qo'yamiz — shunda avvalgi kanalning dekoder holati keyingi kanalga
         // "yopishib qolmaydi" (aynan shu, ba'zi kanal ishlab turib to'satdan
         // ishlamay qolishining asosiy sababi edi).
-        preparePlayback(channel)
+        exoPlayer.stop()
+        exoPlayer.clearMediaItems()
+        exoPlayer.setMediaItem(MediaItem.fromUri(channel.url))
+        exoPlayer.prepare()
+        exoPlayer.playWhenReady = true
         updatePlayPauseIcon()
         adapter.markSelectedByUrl(channel.url)
     }
@@ -764,7 +650,7 @@ class PlayerActivity : AppCompatActivity() {
             }
         }
 
-        AlertDialog.Builder(this, R.style.SignalDialogTheme)
+        AlertDialog.Builder(this)
             .setTitle(R.string.audio_track_dialog_title)
             .setItems(labels.toTypedArray()) { dialog, which ->
                 val entry = entries[which]
@@ -822,51 +708,28 @@ class PlayerActivity : AppCompatActivity() {
         val scroll = ScrollView(this)
         scroll.addView(container)
 
-        AlertDialog.Builder(this, R.style.SignalDialogTheme)
+        AlertDialog.Builder(this)
             .setTitle(getString(R.string.epg_dialog_title, channel.name))
             .setView(scroll)
             .setPositiveButton(R.string.epg_close) { dialog, _ -> dialog.dismiss() }
             .show()
     }
 
-    private var drawerFetchRetryCount = 0
-    private val drawerFetchRetryDelaysMs = longArrayOf(2000, 4000, 8000, 15000, 30000)
-
-    /** MUHIM: avval bitta urinish yetarli emas edi — internet birozgina qoqilib
-     * qolsa, kanal ro'yxati (drawer) abadiy bo'sh qolar edi. Endi bir necha marta
-     * qayta urinadi. */
     private fun loadChannelsForDrawer() {
         executor.execute {
             try {
                 val channels = M3UParser.fetch(MainActivity.PLAYLIST_URL)
-                mainHandler.post {
-                    drawerFetchRetryCount = 0
-                    onChannelsLoaded(channels)
-                }
+                mainHandler.post { onChannelsLoaded(channels) }
             } catch (e: Exception) {
                 mainHandler.post {
-                    if (drawerFetchRetryCount < drawerFetchRetryDelaysMs.size) {
-                        val delay = drawerFetchRetryDelaysMs[drawerFetchRetryCount]
-                        drawerFetchRetryCount++
-                        mainHandler.postDelayed({ loadChannelsForDrawer() }, delay)
-                    } else {
-                        statusText.visibility = View.VISIBLE
-                        statusText.text = getString(R.string.load_error, e.message ?: "")
-                    }
+                    statusText.visibility = View.VISIBLE
+                    statusText.text = getString(R.string.load_error, e.message ?: "")
                 }
             }
         }
     }
 
     private fun onChannelsLoaded(channels: List<Channel>) {
-        if (allChannels.isNotEmpty() && channels.size < allChannels.size / 2) {
-            if (drawerFetchRetryCount < drawerFetchRetryDelaysMs.size) {
-                val delay = drawerFetchRetryDelaysMs[drawerFetchRetryCount]
-                drawerFetchRetryCount++
-                mainHandler.postDelayed({ loadChannelsForDrawer() }, delay)
-            }
-            return
-        }
         allChannels = channels
         categories = channels.map { it.group.trim() }
             .filter { it.isNotEmpty() }
@@ -875,34 +738,17 @@ class PlayerActivity : AppCompatActivity() {
         buildTabs()
         applyFilter()
         adapter.markSelectedByUrl(currentChannel?.url ?: "")
-
-        // To'liq ro'yxat yuklangач joriy kanalning mos yozuvini topib, uning
-        // tvg-id/guruh ma'lumotini sinxronlaymiz (ijro davom etadi, faqat EPG
-        // yorlig'i to'g'ri ko'rinishi uchun) — playback qayta boshlanmaydi.
-        val current = currentChannel
-        if (current != null) {
-            val match = channels.firstOrNull { it.url == current.url }
-            if (match != null && match.tvgId != current.tvgId) {
-                currentChannel = match
-                updateProgramLabel()
-            }
-        }
     }
 
-    /**
-     * Televizo uslubidagi chap ustun: toifalar tik ro'yxat holida, har biri
-     * to'liq kenglikda bosiladigan qator — gorizontal chip qatoridan farqli
-     * o'laroq, ko'p toifa bo'lsa ham hammasi tik skroll bilan ko'rinadi.
-     */
     private fun buildTabs() {
-        categoryRail.removeAllViews()
-        categoryRail.addView(makeCategoryRow(getString(R.string.category_all), currentCategory == null) {
+        tabsRow.removeAllViews()
+        tabsRow.addView(makeTabButton(getString(R.string.category_all), currentCategory == null) {
             currentCategory = null
             buildTabs()
             applyFilter()
         })
         categories.forEach { cat ->
-            categoryRail.addView(makeCategoryRow(cat.uppercase(), currentCategory == cat) {
+            tabsRow.addView(makeTabButton(cat.uppercase(), currentCategory == cat) {
                 currentCategory = cat
                 buildTabs()
                 applyFilter()
@@ -910,28 +756,30 @@ class PlayerActivity : AppCompatActivity() {
         }
     }
 
-    private fun makeCategoryRow(label: String, selected: Boolean, onClick: () -> Unit): TextView {
-        val row = TextView(this)
-        row.text = label
-        row.textSize = 12.5f
-        val padH = (16 * resources.displayMetrics.density).toInt()
-        val padV = (13 * resources.displayMetrics.density).toInt()
-        row.setPadding(padH, padV, padH, padV)
-        row.setTextColor(
-            ContextCompat.getColor(this, if (selected) R.color.amber else R.color.text)
+    private fun makeTabButton(label: String, selected: Boolean, onClick: () -> Unit): Button {
+        val btn = Button(this)
+        btn.text = label
+        btn.textSize = 11f
+        btn.setPadding(32, 14, 32, 14)
+        btn.isAllCaps = true
+        btn.stateListAnimator = null
+        btn.minWidth = 0
+        btn.minimumWidth = 0
+        btn.setBackgroundResource(if (selected) R.drawable.tab_chip_selected else R.drawable.tab_chip_unselected)
+        btn.setTextColor(
+            ContextCompat.getColor(this, if (selected) R.color.bg else R.color.text)
         )
-        row.setBackgroundColor(
-            ContextCompat.getColor(this, if (selected) R.color.panel2 else android.R.color.transparent)
-        )
-        row.isClickable = true
-        row.isFocusable = true
-        row.maxLines = 2
-        row.layoutParams = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
+        val margin = (6 * resources.displayMetrics.density).toInt()
+        val params = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
         )
-        row.setOnClickListener { onClick() }
-        return row
+        params.marginStart = margin
+        params.topMargin = margin / 2
+        params.bottomMargin = margin / 2
+        btn.layoutParams = params
+        btn.setOnClickListener { onClick() }
+        return btn
     }
 
     private fun applyFilter() {
@@ -980,8 +828,8 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     override fun onBackPressed() {
-        if (isChannelsOverlayOpen()) {
-            closeChannelsOverlay()
+        if (drawerLayout.isDrawerOpen(Gravity.END)) {
+            drawerLayout.closeDrawers()
         } else {
             super.onBackPressed()
         }
@@ -1000,23 +848,22 @@ class PlayerActivity : AppCompatActivity() {
         if (player == null) {
             setupPlayer()
             currentChannel?.let { channel ->
-                preparePlayback(channel)
+                applyChannelHeaders(channel)
+                player?.setMediaItem(MediaItem.fromUri(channel.url))
+                player?.prepare()
+                player?.playWhenReady = true
                 updatePlayPauseIcon()
             }
         }
-        if (allChannels.isEmpty() && drawerFetchRetryCount == 0) {
-            loadChannelsForDrawer()
+        // Sozlamalardan EPG havolasi o'zgargan bo'lishi mumkin.
+        EpgRepository.ensureLoaded(AppPrefs.epgUrl(this)) {
+            updateProgramLabel()
+            adapter.refreshEpgRows()
         }
-        lastWatchdogPosition = -1L
-        lastWatchdogUnchangedCount = 0
-        mainHandler.removeCallbacks(stallWatchdogRunnable)
-        mainHandler.postDelayed(stallWatchdogRunnable, WATCHDOG_INTERVAL_MS)
     }
 
     override fun onStop() {
         super.onStop()
-        mainHandler.removeCallbacks(stallWatchdogRunnable)
-        cancelOpenWatchdog()
         player?.release()
         player = null
     }
@@ -1031,11 +878,9 @@ class PlayerActivity : AppCompatActivity() {
         private const val EPG_LABEL_REFRESH_MS = 30_000L
         private const val OVERLAY_AUTO_HIDE_MS = 4_000L
         private const val STATS_REFRESH_MS = 2_000L
-        private const val WATCHDOG_INTERVAL_MS = 8_000L
-        // Shu qadar vaqt ichida kanal STATE_READY'ga yetmasa — "abadiy
-        // yuklanadigan" o'lik oqim deb qabul qilinadi va tiklash zanjiri
-        // qo'lda ishga tushiriladi.
-        private const val OPEN_TIMEOUT_MS = 12_000L
         private val timeFormat = SimpleDateFormat("HH:mm", Locale.US)
+        private const val DEFAULT_USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     }
 }

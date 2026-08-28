@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Drawer ichidagi har bir band ("Barcha kanallar", "Telegram", "Sozlamalar"
+     va h.k.) endi tekis ro'yxat qatori emas, alohida suzib turgan yumaloq
+     burchakli kartochka — avvalgi DrawerRow'ning tekis ko'rinishidan
+     butunlay farq qiladi. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_selected="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/glass_card_selected" />
+            <stroke android:width="1.5dp" android:color="@color/amber" />
+            <corners android:radius="16dp" />
+        </shape>
+    </item>
+    <item android:state_pressed="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/glass_card_selected" />
+            <stroke android:width="1dp" android:color="@color/amber" />
+            <corners android:radius="16dp" />
+        </shape>
+    </item>
+    <item android:state_focused="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/glass_card_selected" />
+            <stroke android:width="1dp" android:color="@color/amber" />
+            <corners android:radius="16dp" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/glass_card" />
+            <stroke android:width="1dp" android:color="@color/glass_border" />
+            <corners android:radius="16dp" />
+        </shape>
+    </item>
+</selector>

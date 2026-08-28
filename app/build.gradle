@@ -13,16 +13,6 @@ android {
         targetSdk 36
         versionCode 1
         versionName "1.0"
-
-        // FFmpeg dekoder kutubxonasi (nextlib) arm64-v8a/armeabi-v7a'dan
-        // tashqari x86/x86_64 uchun ham fayl qo'shadi. Haqiqiy telefon va
-        // Smart TV pristavkalarning deyarli barchasi ARM protsessorli —
-        // x86/x86_64 esa faqat kompyuter emulyatorlari uchun kerak. Ularni
-        // olib tashlash APK hajmini kamaytiradi va real qurilmaga ta'sir
-        // qilmaydi.
-        ndk {
-            abiFilters "armeabi-v7a", "arm64-v8a"
-        }
     }
 
     buildTypes {
@@ -63,17 +53,6 @@ dependencies {
     implementation 'androidx.media3:media3-exoplayer-dash:1.10.1'
     implementation 'androidx.media3:media3-datasource:1.10.1'
     implementation 'androidx.media3:media3-ui:1.10.1'
-
-    // OkHttp asosidagi tarmoq qatlami. Android'ning eski, oddiy
-    // HttpURLConnection'i (avval ishlatilgan DefaultHttpDataSource) ba'zi
-    // IPTV serverlarda (ayniqsa Cloudflare orqasida turganlarda) "bot"likka
-    // o'xshab, jimgina rad etiladi — xato ham bermaydi, shunchaki hech narsa
-    // yubormaydi. Televizo kabi ko'plab professional pleyerlar aynan OkHttp
-    // ishlatadi (HTTP/2, ulanishni qayta ishlatish, zamonaviyroq TLS
-    // muzokarasi) — shu serverlarda ko'proq "haqiqiy pleyer"ga o'xshab
-    // ko'rinadi va rad etilmaydi.
-    implementation 'androidx.media3:media3-datasource-okhttp:1.10.1'
-    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
 
     // FFmpeg-based audio decoder for Media3 (AC-3 / E-AC-3 / DTS va h.k.).
     // Ko'p bepul IPTV kanallari shu kodeklarda audio yuboradi va Android'ning

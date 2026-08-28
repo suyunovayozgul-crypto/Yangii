@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Video/asosiy ekran ustiga suzib chiquvchi "shisha" panel foni — avvalgi
+     bir xil qattiq rangli (drawer_bg) panel o'rniga. Chap/o'ng burchaklar
+     yumaloqlangan va ingichka chegara chizig'i bor, shu bilan panel butun
+     ekrandan "ajralib" turadi, xuddi u ustiga qo'yilgandek. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/glass_panel" />
+    <stroke android:width="1dp" android:color="@color/glass_border" />
+</shape>
