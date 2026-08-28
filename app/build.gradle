@@ -9,7 +9,11 @@ android {
 
     defaultConfig {
         applicationId "com.signal.iptv"
-        minSdk 23
+        // libmpv (dev.jdtech.mpv) kutubxonasi minSdk 26 talab qiladi — pastroq
+        // qiymat bilan manifest merge bosqichida build butunlay yiqilardi
+        // ("uses-sdk:minSdkVersion 23 cannot be smaller than version 26").
+        // 26 (Android 8.0) dan pastroq qurilmalar allaqachon juda kam qolgan.
+        minSdk 26
         targetSdk 36
         versionCode 1
         versionName "1.0"
