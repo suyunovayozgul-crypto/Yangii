@@ -576,11 +576,18 @@ class PlayerActivity : AppCompatActivity() {
         try {
             val httpFactory = OkHttpDataSource.Factory(okHttpClient)
                 .setUserAgent(userAgent)
+            // Server "Range" so'ralganda OkHttp'ning avtomatik gzip-ochish
+            // mexanizmi ishlamay qoladi (OkHttp buni faqat Range yo'q paytda
+            // qiladi) — agar server shunda ham siqilgan javob yuborsa, ExoPlayer
+            // xom gzip baytlarini matn deb o'qib "#EXTM3U bilan boshlanmayapti"
+            // xatosini beradi. Buni butunlay oldini olish uchun serverdan hech
+            // qachon siqilgan javob so'ramaymiz.
+            val headers = mutableMapOf("Accept-Encoding" to "identity")
             if (referer.isNotBlank()) {
-                httpFactory.setDefaultRequestProperties(
-                    mapOf("Referer" to referer, "Origin" to referer.trimEnd('/'))
-                )
+                headers["Referer"] = referer
+                headers["Origin"] = referer.trimEnd('/')
             }
+            httpFactory.setDefaultRequestProperties(headers)
             val mediaSource = DefaultMediaSourceFactory(httpFactory)
                 .createMediaSource(MediaItem.fromUri(channel.url))
 
