@@ -388,6 +388,14 @@ class PlayerActivity : AppCompatActivity() {
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
+                val stateName = when (playbackState) {
+                    Player.STATE_IDLE -> "IDLE"
+                    Player.STATE_BUFFERING -> "BUFFERING"
+                    Player.STATE_READY -> "READY"
+                    Player.STATE_ENDED -> "ENDED"
+                    else -> playbackState.toString()
+                }
+                Log.d("PlayerDebug", "onPlaybackStateChanged -> $stateName (${currentChannel?.name})")
                 if (playbackState == Player.STATE_READY) {
                     cancelOpenWatchdog()
                 }
@@ -561,22 +569,35 @@ class PlayerActivity : AppCompatActivity() {
         val userAgent = channel.userAgent.ifBlank { M3UParser.BROWSER_USER_AGENT }
         val candidates = refererCandidates(channel)
         val referer = candidates[refererAttemptIndex.coerceIn(0, candidates.size - 1)]
-        val httpFactory = OkHttpDataSource.Factory(okHttpClient)
-            .setUserAgent(userAgent)
-        if (referer.isNotBlank()) {
-            httpFactory.setDefaultRequestProperties(
-                mapOf("Referer" to referer, "Origin" to referer.trimEnd('/'))
-            )
-        }
-        val mediaSource = DefaultMediaSourceFactory(httpFactory)
-            .createMediaSource(MediaItem.fromUri(channel.url))
+        Log.d("PlayerDebug", "preparePlayback boshlandi: url=${channel.url} referer=\"$referer\" ua=\"$userAgent\"")
+        try {
+            val httpFactory = OkHttpDataSource.Factory(okHttpClient)
+                .setUserAgent(userAgent)
+            if (referer.isNotBlank()) {
+                httpFactory.setDefaultRequestProperties(
+                    mapOf("Referer" to referer, "Origin" to referer.trimEnd('/'))
+                )
+            }
+            val mediaSource = DefaultMediaSourceFactory(httpFactory)
+                .createMediaSource(MediaItem.fromUri(channel.url))
 
-        exoPlayer.stop()
-        exoPlayer.clearMediaItems()
-        exoPlayer.setMediaSource(mediaSource)
-        exoPlayer.prepare()
-        exoPlayer.playWhenReady = true
-        scheduleOpenWatchdog(channel)
+            exoPlayer.stop()
+            exoPlayer.clearMediaItems()
+            exoPlayer.setMediaSource(mediaSource)
+            exoPlayer.prepare()
+            exoPlayer.playWhenReady = true
+            Log.d("PlayerDebug", "prepare() chaqirildi, holat hozir: ${exoPlayer.playbackState}")
+            scheduleOpenWatchdog(channel)
+        } catch (e: Exception) {
+            // Agar shu blok ichida biror narsa (masalan noto'g'ri URL formati)
+            // kutilmagan xato bersa — bu avvalgi kodda BUTUNLAY yashirin qolar
+            // edi (na onPlayerError, na watchdog ushlaydi, chunki hech qachon
+            // shu funksiyaning oxiriga yetib bormaydi). Endi buni ham ochiq
+            // ko'rsatamiz.
+            lastErrorMessage = "PREPARE_EXCEPTION: ${e.javaClass.simpleName}: ${e.message}"
+            Log.e("PlayerError", "preparePlayback xato berdi: url=${channel.url}", e)
+            handlePlaybackError()
+        }
     }
 
     /**
