@@ -99,7 +99,7 @@ class MainActivity : AppCompatActivity() {
             intent.putExtra("channel_tvgid", channel.tvgId)
             intent.putExtra("channel_logo", channel.logo)
             intent.putExtra("channel_useragent", channel.userAgent)
-            intent.putExtra("channel_referrer", channel.referrer)
+            intent.putExtra("channel_referrer", channel.referer)
             startActivity(intent)
         }
         adapter = ChannelAdapter(emptyList()) { channel, _ -> openChannel(channel) }

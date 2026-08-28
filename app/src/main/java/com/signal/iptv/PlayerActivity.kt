@@ -214,7 +214,7 @@ class PlayerActivity : AppCompatActivity() {
             group = intent.getStringExtra("channel_group") ?: "",
             tvgId = intent.getStringExtra("channel_tvgid") ?: "",
             userAgent = intent.getStringExtra("channel_useragent") ?: "",
-            referrer = intent.getStringExtra("channel_referrer") ?: ""
+            referer = intent.getStringExtra("channel_referrer") ?: ""
         )
 
         // MUHIM: ekran bir necha daqiqadan keyin o'zi o'chib/qulflanib qolsa,
@@ -425,7 +425,7 @@ class PlayerActivity : AppCompatActivity() {
         // avval buni o'chirib, darhol (retryCount hisobiga kirmasdan) qayta
         // uriniladi. Ko'p hollarda muammo aynan shu noto'g'ri taxmin qilingan
         // Referer/Origin bo'ladi — server buni "bot"likka o'xshab rad etadi.
-        if (!suppressAutoReferer && channel.referrer.isBlank()) {
+        if (!suppressAutoReferer && channel.referer.isBlank()) {
             suppressAutoReferer = true
             statusHint(getString(R.string.stream_reconnecting))
             mainHandler.postDelayed({ preparePlayback(channel) }, 500L)
@@ -490,7 +490,7 @@ class PlayerActivity : AppCompatActivity() {
      * chetlab o'tadi (Televizo va boshqa ilovalar ham aynan shunday qiladi).
      */
     private fun deriveReferer(channel: Channel): String {
-        if (channel.referrer.isNotBlank()) return channel.referrer
+        if (channel.referer.isNotBlank()) return channel.referer
         return try {
             val uri = android.net.Uri.parse(channel.url)
             "${uri.scheme}://${uri.host}/"
@@ -502,11 +502,11 @@ class PlayerActivity : AppCompatActivity() {
     private fun preparePlayback(channel: Channel) {
         val exoPlayer = player ?: return
         val userAgent = channel.userAgent.ifBlank { M3UParser.BROWSER_USER_AGENT }
-        // Playlist o'zi Referer ko'rsatgan bo'lsa (channel.referrer) — bu ishonchli,
+        // Playlist o'zi Referer ko'rsatgan bo'lsa (channel.referer) — bu ishonchli,
         // har doim yuboriladi. Lekin sun'iy taxmin qilingan Referer (deriveReferer())
         // faqat suppressAutoReferer=false bo'lganda qo'shiladi — birinchi urinish
         // muvaffaqiyatsiz bo'lsa, handlePlaybackError() buni o'chirib qayta uradi.
-        val referer = if (channel.referrer.isNotBlank() || !suppressAutoReferer) {
+        val referer = if (channel.referer.isNotBlank() || !suppressAutoReferer) {
             deriveReferer(channel)
         } else {
             ""
