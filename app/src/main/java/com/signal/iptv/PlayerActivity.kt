@@ -253,7 +253,7 @@ class PlayerActivity : AppCompatActivity() {
             group = intent.getStringExtra("channel_group") ?: "",
             tvgId = intent.getStringExtra("channel_tvgid") ?: "",
             userAgent = intent.getStringExtra("channel_useragent") ?: "",
-            referer = intent.getStringExtra("channel_referrer") ?: ""
+            referrer = intent.getStringExtra("channel_referrer") ?: ""
         )
 
         // MUHIM: ekran bir necha daqiqadan keyin o'zi o'chib/qulflanib qolsa,
@@ -592,7 +592,7 @@ class PlayerActivity : AppCompatActivity() {
      */
     private fun refererCandidates(channel: Channel): List<String> {
         val list = mutableListOf<String>()
-        if (channel.referer.isNotBlank()) list.add(channel.referer)
+        if (channel.referrer.isNotBlank()) list.add(channel.referrer)
         list.add("")
         try {
             val portalUri = android.net.Uri.parse(MainActivity.PLAYLIST_URL)
