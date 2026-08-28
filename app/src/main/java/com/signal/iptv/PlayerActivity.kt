@@ -68,6 +68,36 @@ class PlayerActivity : AppCompatActivity() {
             .followRedirects(true)
             .followSslRedirects(true)
             .retryOnConnectionFailure(true)
+            // TASHXIS: har bir HTTP so'rov/javobning haqiqiy holatini
+            // (status kod, sarlavhalar, javob tanasining boshi) Logcat'ga
+            // yozib boradi. Bu orqali "nega #EXTM3U bilan boshlanmayapti"
+            // degan savolga taxmin emas, aynan qanday baytlar kelayotganini
+            // ko'ramiz — masalan operator tarmog'i (mobil internet) content'ni
+            // siqib/o'zgartirib yuborayotganmi, server chindan xato sahifa
+            // qaytarayaptimi, yoki boshqa narsami.
+            .addInterceptor { chain ->
+                val request = chain.request()
+                val response = chain.proceed(request)
+                try {
+                    val peek = response.peekBody(300)
+                    val bytes = peek.bytes()
+                    val asText = try {
+                        String(bytes, Charsets.UTF_8).replace("\n", "\\n").take(200)
+                    } catch (e: Exception) { "<matn emas>" }
+                    val hex = bytes.take(8).joinToString(" ") { "%02x".format(it) }
+                    Log.d(
+                        "HttpDebug",
+                        "${request.method} ${request.url} -> ${response.code} " +
+                            "content-type=${response.header("Content-Type")} " +
+                            "content-encoding=${response.header("Content-Encoding")} " +
+                            "content-length=${response.header("Content-Length")} " +
+                            "hex_boshi=[$hex] matn_boshi=\"$asText\""
+                    )
+                } catch (e: Exception) {
+                    Log.d("HttpDebug", "${request.method} ${request.url} -> ${response.code} (body o'qib bo'lmadi: ${e.message})")
+                }
+                response
+            }
             .build()
     }
 
