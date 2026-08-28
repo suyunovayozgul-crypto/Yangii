@@ -592,6 +592,27 @@ class PlayerActivity : AppCompatActivity() {
             if (exoPlayer != null && currentChannel?.url == channel.url &&
                 exoPlayer.playbackState != Player.STATE_READY
             ) {
+                // Bu yerda ExoPlayer hech qanday xato bermagan — shunchaki
+                // OPEN_TIMEOUT_MS ichida STATE_READY'ga yetmadi. Sababsiz
+                // "hozircha mavjud emas" deb chiqaverish o'rniga, ExoPlayer'ning
+                // o'sha paytdagi holatini (IDLE/BUFFERING/ENDED, va hozirgача
+                // qancha ma'lumot yuklab olingani) yozib qo'yamiz — shu orqali
+                // "server umuman javob bermayapti"mi yoki "javob keladi-yu, juda
+                // sekin/tugamayapti"mi ekanini ajratib bo'ladi.
+                val stateName = when (exoPlayer.playbackState) {
+                    Player.STATE_IDLE -> "IDLE (hali so'rov boshlanmagan yoki tugagan)"
+                    Player.STATE_BUFFERING -> "BUFFERING (ma'lumot kutilmoqda)"
+                    Player.STATE_ENDED -> "ENDED"
+                    else -> exoPlayer.playbackState.toString()
+                }
+                val loadedMs = exoPlayer.bufferedPosition
+                val isLoading = exoPlayer.isLoading
+                lastErrorMessage = "WATCHDOG_TIMEOUT: $OPEN_TIMEOUT_MS ms ichida STATE_READY'ga yetmadi. " +
+                    "holat=$stateName, isLoading=$isLoading, bufferedPositionMs=$loadedMs"
+                Log.e(
+                    "PlayerError",
+                    "${channel.name} url=${channel.url} referer=\"${refererCandidates(channel).getOrNull(refererAttemptIndex)}\": $lastErrorMessage"
+                )
                 handlePlaybackError()
             }
         }
