@@ -572,7 +572,7 @@ class PlayerActivity : AppCompatActivity() {
                 val bytes = source.buffer.snapshot().toByteArray()
                 when {
                     bytes.isEmpty() -> null
-                    bytes[0] == 0x47.toByte() -> MimeTypes.APPLICATION_MP2T
+                    bytes[0] == 0x47.toByte() -> MimeTypes.VIDEO_MP2T
                     String(bytes, Charsets.ISO_8859_1).trimStart().startsWith("#EXTM3U") ->
                         MimeTypes.APPLICATION_M3U8
                     else -> null
