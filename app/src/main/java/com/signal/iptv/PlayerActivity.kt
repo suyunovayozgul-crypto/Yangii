@@ -79,6 +79,25 @@ class PlayerActivity : AppCompatActivity() {
         override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = arrayOf()
     }
 
+    // Ba'zi token-asosli oqimlar (masalan ?token=... bilan keladiganlar)
+    // birinchi so'rovda cookie/sessiya o'rnatadi va keyingi qayta
+    // yo'naltirishlarda (redirect) shu cookie'ni talab qiladi. Cookie
+    // saqlanmasa, server har safar "notanish" so'rovchi deb hisoblab,
+    // cheksiz qayta yo'naltirishda ("Too many redirects") ushlab qoladi —
+    // bu ExoPlayer'da aniq xato bermay, abadiy "buffering" bo'lib
+    // ko'rinadi. Oddiy xotiradagi (in-memory) CookieJar shu holatni
+    // tuzatadi — Televizo va boshqa to'liq brauzer-uslubidagi pleyerlar
+    // ham xuddi shunday ishlaydi.
+    private val inMemoryCookieJar = object : okhttp3.CookieJar {
+        private val store = mutableMapOf<String, List<okhttp3.Cookie>>()
+        override fun saveFromResponse(url: okhttp3.HttpUrl, cookies: List<okhttp3.Cookie>) {
+            store[url.host] = cookies
+        }
+        override fun loadForRequest(url: okhttp3.HttpUrl): List<okhttp3.Cookie> {
+            return store[url.host] ?: emptyList()
+        }
+    }
+
     private val okHttpClient: OkHttpClient by lazy {
         val sslContext = javax.net.ssl.SSLContext.getInstance("TLS")
         sslContext.init(null, arrayOf<javax.net.ssl.TrustManager>(lenientTrustManager), java.security.SecureRandom())
@@ -89,6 +108,7 @@ class PlayerActivity : AppCompatActivity() {
             .followRedirects(true)
             .followSslRedirects(true)
             .retryOnConnectionFailure(true)
+            .cookieJar(inMemoryCookieJar)
             .sslSocketFactory(sslContext.socketFactory, lenientTrustManager)
             .hostnameVerifier { _, _ -> true }
             .build()
@@ -741,6 +761,11 @@ class PlayerActivity : AppCompatActivity() {
                 exoPlayer.playbackState != Player.STATE_READY &&
                 !mpvPlaybackActive
             ) {
+                // Bu holatda ExoPlayer hech qanday aniq xato bermagan —
+                // shunchaki OPEN_TIMEOUT_MS ichida hech narsa kelmadi. Buni
+                // "noma'lum" deb qoldirmasdan, aynan shu holatni yozib
+                // qo'yamiz — diagnostikada aniq ko'rinishi uchun.
+                lastErrorDetail = "Vaqt tugadi: ${OPEN_TIMEOUT_MS / 1000}s ichida server javob bermadi (jim qolgan ulanish)"
                 handlePlaybackError()
             }
         }
