@@ -373,8 +373,17 @@ class PlayerActivity : AppCompatActivity() {
                 // yo'qolib qolmasligi uchun logga yozamiz va ekranga chiqarish
                 // uchun saqlab qo'yamiz — aks holda faqat umumiy "ulanish
                 // tiklanmoqda" matni ko'rinadi va sababni bilib bo'lmaydi.
-                lastErrorMessage = "${error.errorCodeName}: ${error.message}"
-                Log.e("PlayerError", "${currentChannel?.name}: $lastErrorMessage", error)
+                // "Source error" kabi umumiy xabar yetarli emas — cause zanjirini
+                // qazib, HTTP status kodi (masalan 403) yoki serverning aniq javob
+                // matni (masalan HTML xato sahifasi) bor bo'lsa, shuni chiqaramiz.
+                lastErrorMessage = "${error.errorCodeName}: ${describeRootCause(error)}"
+                val ch = currentChannel
+                val usedReferer = ch?.let { refererCandidates(it).getOrNull(refererAttemptIndex) } ?: "?"
+                Log.e(
+                    "PlayerError",
+                    "${ch?.name} url=${ch?.url} referer=\"$usedReferer\": $lastErrorMessage",
+                    error
+                )
                 handlePlaybackError()
             }
 
@@ -426,6 +435,31 @@ class PlayerActivity : AppCompatActivity() {
      * (og'irroq, lekin "osilib qolgan" holatlarni tuzatadi), va faqat shu ham
      * yordam bermasa — foydalanuvchiga "Qayta urinish" tugmasini ko'rsatish.
      */
+    /**
+     * ExoPlayer'ning "Source error" kabi umumiy xabari ortida ko'pincha aniqroq
+     * sabab yashiringan bo'ladi: masalan HttpDataSource.InvalidResponseCodeException
+     * ichida haqiqiy HTTP status kodi (403, 404...) va serverning javob tanasi
+     * (ko'pincha HTML xato sahifasi) bor. cause zanjirini pastga tushib, shularni
+     * topib, bitta o'qiladigan matnga aylantiramiz — shunda "nima yetishmayapti"
+     * taxmin emas, aniq fakt bo'ladi.
+     */
+    private fun describeRootCause(error: PlaybackException): String {
+        var cause: Throwable? = error
+        var deepest: Throwable = error
+        while (cause != null) {
+            deepest = cause
+            if (cause is androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException) {
+                val body = try {
+                    cause.responseBody?.toString(Charsets.UTF_8)?.take(200) ?: ""
+                } catch (e: Exception) { "" }
+                return "HTTP ${cause.responseCode} url=${cause.dataSpec.uri}" +
+                    if (body.isNotBlank()) " body=\"${body.replace("\n", " ")}\"" else ""
+            }
+            cause = cause.cause
+        }
+        return deepest.message ?: error.message ?: "noma'lum xato"
+    }
+
     private fun handlePlaybackError() {
         val channel = currentChannel ?: return
         // Referer variantlari hali tugamagan bo'lsa — keyingisini darhol
