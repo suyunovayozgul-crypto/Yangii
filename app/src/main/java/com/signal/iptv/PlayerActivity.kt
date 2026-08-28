@@ -42,6 +42,7 @@ import androidx.recyclerview.widget.RecyclerView
 import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.NextRenderersFactory
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import okhttp3.OkHttpClient
+import javax.net.ssl.X509TrustManager
 import okhttp3.Request
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -60,7 +61,26 @@ class PlayerActivity : AppCompatActivity() {
     // urinishlar) uchun qayta ishlatiladi — ulanish poolini saqlab qolish
     // uchun bu muhim, har safar yangi OkHttpClient yaratish bu afzallikni
     // yo'qqa chiqaradi.
+    // Ko'p bepul IPTV panellari (masalan, ba'zi 4K/tort kanallarni beruvchi
+    // serverlar) HTTPS sertifikatini noto'g'ri sozlagan bo'ladi — sertifikat
+    // zanjiri to'liq emas yoki o'z-o'ziga imzolangan. Android'ning standart
+    // tekshiruvi buni "SSLHandshakeException: Trust anchor for certification
+    // path not found" deb rad etadi — bu ExoPlayer'da juda keng tarqalgan,
+    // hujjatlashtirilgan muammo (google/ExoPlayer#4383, #5009, #7786) va
+    // aynan "ba'zi kanallar ochiladi, ba'zilari ochilmaydi" holatiga to'g'ri
+    // keladi (faqat sertifikati chala serverlar ta'sirlanadi). VLC-asosli
+    // dasturlar (masalan Televizo) ko'pincha bunday xatolarni e'tiborsiz
+    // qoldiradi — biz ham xuddi shunday, faqat video oqimi uchun (boshqa
+    // hech qanday tarmoq so'rovi uchun emas), qilamiz.
+    private val lenientTrustManager = object : X509TrustManager {
+        override fun checkClientTrusted(chain: Array<out java.security.cert.X509Certificate>?, authType: String?) {}
+        override fun checkServerTrusted(chain: Array<out java.security.cert.X509Certificate>?, authType: String?) {}
+        override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = arrayOf()
+    }
+
     private val okHttpClient: OkHttpClient by lazy {
+        val sslContext = javax.net.ssl.SSLContext.getInstance("TLS")
+        sslContext.init(null, arrayOf<javax.net.ssl.TrustManager>(lenientTrustManager), java.security.SecureRandom())
         OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
@@ -68,6 +88,8 @@ class PlayerActivity : AppCompatActivity() {
             .followRedirects(true)
             .followSslRedirects(true)
             .retryOnConnectionFailure(true)
+            .sslSocketFactory(sslContext.socketFactory, lenientTrustManager)
+            .hostnameVerifier { _, _ -> true }
             .build()
     }
 
