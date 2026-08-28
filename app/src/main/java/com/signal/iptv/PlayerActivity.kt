@@ -87,6 +87,7 @@ class PlayerActivity : AppCompatActivity() {
     // ham yordam bermasa, foydalanuvchiga "Qayta urinish" tugmasi ko'rsatiladi.
     private var retryCount: Int = 0
     private var hardRecoverAttempted = false
+    private var lastErrorMessage: String = ""
 
     // Playlist ba'zi kanallar uchun Referer ko'rsatmagan bo'lsa, preparePlayback()
     // shu kanalning o'z domenidan sun'iy Referer/Origin "taxmin qiladi" (pastda,
@@ -368,6 +369,12 @@ class PlayerActivity : AppCompatActivity() {
         playerView.resizeMode = resizeModes[resizeModeIndex]
         exoPlayer.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
+                // Xatoning aniq sababi (403, timeout, kodek, DNS va h.k.) shu yerda
+                // yo'qolib qolmasligi uchun logga yozamiz va ekranga chiqarish
+                // uchun saqlab qo'yamiz — aks holda faqat umumiy "ulanish
+                // tiklanmoqda" matni ko'rinadi va sababni bilib bo'lmaydi.
+                lastErrorMessage = "${error.errorCodeName}: ${error.message}"
+                Log.e("PlayerError", "${currentChannel?.name}: $lastErrorMessage", error)
                 handlePlaybackError()
             }
 
@@ -562,7 +569,8 @@ class PlayerActivity : AppCompatActivity() {
 
     private fun showStreamError(channelName: String) {
         streamErrorView.visibility = View.VISIBLE
-        streamErrorView.text = getString(R.string.stream_error, channelName)
+        val detail = if (lastErrorMessage.isNotBlank()) "\n$lastErrorMessage" else ""
+        streamErrorView.text = getString(R.string.stream_error, channelName) + detail
         retryBtn.visibility = View.VISIBLE
         keepOverlayVisible()
     }
