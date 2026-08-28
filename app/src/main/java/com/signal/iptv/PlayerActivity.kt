@@ -1,5 +1,6 @@
 package com.signal.iptv
 
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.os.Build
 import android.os.Bundle
@@ -166,6 +167,14 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var statsView: TextView
     private lateinit var streamErrorView: TextView
     private lateinit var retryBtn: Button
+    private lateinit var diagnosticsBtn: Button
+
+    // 100% aniq bilish uchun taxmin emas, HAQIQIY ma'lumot kerak: qaysi
+    // bosqich (soft retry / hard recover / mpv) yiqilgani, ExoPlayer'ning
+    // aynan qaysi xato kodi va — eng muhimi — agar bu HTTP javobi bo'lsa,
+    // aynan qaysi status kodi (403, 404, 451 va h.k.) qaytgani.
+    private var lastFailStage: String = ""
+    private var lastErrorDetail: String = ""
     private lateinit var resizeLabel: TextView
     private lateinit var categoryRail: LinearLayout
     private lateinit var searchBox: EditText
@@ -269,6 +278,9 @@ class PlayerActivity : AppCompatActivity() {
         streamErrorView = findViewById(R.id.playerStreamError)
         retryBtn = findViewById(R.id.playerRetryBtn)
         retryBtn.stateListAnimator = null
+        diagnosticsBtn = findViewById(R.id.playerDiagnosticsBtn)
+        diagnosticsBtn.stateListAnimator = null
+        diagnosticsBtn.setOnClickListener { shareDiagnostics() }
         resizeLabel = findViewById(R.id.playerResizeLabel)
         categoryRail = findViewById(R.id.categoryRail)
         searchBox = findViewById(R.id.playerSearchBox)
@@ -398,6 +410,7 @@ class PlayerActivity : AppCompatActivity() {
         playerView.resizeMode = resizeModes[resizeModeIndex]
         exoPlayer.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
+                lastErrorDetail = describeError(error)
                 handlePlaybackError()
             }
 
@@ -430,19 +443,76 @@ class PlayerActivity : AppCompatActivity() {
         val channel = currentChannel ?: return
         if (retryCount < maxSoftRetries) {
             retryCount++
+            lastFailStage = "soft-retry $retryCount/$maxSoftRetries"
             statusHint(getString(R.string.stream_reconnecting))
             mainHandler.postDelayed({ softRetry() }, 1500L * retryCount)
         } else if (!hardRecoverAttempted) {
             hardRecoverAttempted = true
+            lastFailStage = "hard-recover"
             statusHint(getString(R.string.stream_reconnecting))
             mainHandler.postDelayed({ hardRecoverSilently() }, 1500L)
         } else if (!mpvFallbackAttempted) {
             mpvFallbackAttempted = true
+            lastFailStage = "mpv-fallback"
             statusHint(getString(R.string.stream_reconnecting))
             tryMpvFallback(channel)
         } else {
+            lastFailStage = "hammasi tugadi (soft+hard+mpv)"
             showStreamError(channel.name)
         }
+    }
+
+    /**
+     * ExoPlayer/mpv'ning xato sababini imkon qadar aniq matnga aylantiradi —
+     * jumladan HTTP javob kodini (403, 404, 451 va h.k.) sabab zanjiridan
+     * qidirib topadi. Bu "taxmin qilish"ni butunlay yo'qotadi: xato matni
+     * o'zi aynan nima sodir bo'lganini ko'rsatadi.
+     */
+    private fun describeError(error: Throwable): String {
+        var cause: Throwable? = error
+        var httpCode: Int? = null
+        var httpMessage: String? = null
+        while (cause != null) {
+            if (cause is androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException) {
+                httpCode = cause.responseCode
+                httpMessage = cause.responseMessage
+            }
+            cause = cause.cause
+        }
+        val base = if (error is PlaybackException) error.errorCodeName else error.javaClass.simpleName
+        val rootMsg = generateSequence(error) { it.cause }.lastOrNull()?.message ?: error.message
+        return buildString {
+            append(base)
+            if (httpCode != null) append(" | HTTP $httpCode ${httpMessage ?: ""}".trimEnd())
+            if (!rootMsg.isNullOrBlank()) append(" | $rootMsg")
+        }
+    }
+
+    /**
+     * Ekranda ko'rinib turgan kanal + oxirgi xato haqida to'liq texnik matn
+     * tayyorlab, Android'ning ulashish oynasini ochadi — foydalanuvchi buni
+     * bevosita Telegram/istalgan messenjer orqali yuborishi mumkin. Ekran
+     * suratidan farqli o'laroq, bu yerda HAQIQIY xato kodi, ishlatilgan
+     * User-Agent/Referer va qaysi bosqichda (soft/hard/mpv) yiqilgani —
+     * hammasi matn ko'rinishida, aniq va nusxa ko'chirish mumkin.
+     */
+    private fun shareDiagnostics() {
+        val channel = currentChannel ?: return
+        val referer = deriveReferer(channel)
+        val userAgent = channel.userAgent.ifBlank { M3UParser.BROWSER_USER_AGENT }
+        val report = buildString {
+            appendLine("Kanal: ${channel.name}")
+            appendLine("Havola: ${channel.url}")
+            appendLine("Bosqich: ${lastFailStage.ifBlank { "noma'lum" }}")
+            appendLine("Xato: ${lastErrorDetail.ifBlank { "noma'lum" }}")
+            appendLine("User-Agent: $userAgent")
+            appendLine("Referer: ${referer.ifBlank { "(yo'q)" }}")
+        }
+        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, report)
+        }
+        startActivity(Intent.createChooser(sendIntent, getString(R.string.send_diagnostics)))
     }
 
     /**
@@ -469,6 +539,7 @@ class PlayerActivity : AppCompatActivity() {
             },
             onFailed = { reason ->
                 android.util.Log.w("PlayerActivity", "mpv fallback ishlamadi: $reason")
+                lastErrorDetail = "mpv: $reason"
                 mpvPlaybackActive = false
                 if (currentChannel?.url == channel.url) {
                     mpvSurfaceView.visibility = View.GONE
@@ -680,14 +751,17 @@ class PlayerActivity : AppCompatActivity() {
 
     private fun showStreamError(channelName: String) {
         streamErrorView.visibility = View.VISIBLE
-        streamErrorView.text = getString(R.string.stream_error, channelName)
+        val base = getString(R.string.stream_error, channelName)
+        streamErrorView.text = if (lastErrorDetail.isNotBlank()) "$base\n$lastErrorDetail" else base
         retryBtn.visibility = View.VISIBLE
+        diagnosticsBtn.visibility = View.VISIBLE
         keepOverlayVisible()
     }
 
     private fun hideStreamError() {
         streamErrorView.visibility = View.GONE
         retryBtn.visibility = View.GONE
+        diagnosticsBtn.visibility = View.GONE
     }
 
     /**

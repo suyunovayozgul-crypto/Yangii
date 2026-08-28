@@ -232,25 +232,57 @@
                     android:textSize="12sp"
                     android:visibility="gone" />
 
-                <Button
-                    android:id="@+id/playerRetryBtn"
+                <LinearLayout
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:layout_gravity="start"
-                    android:background="@drawable/bg_retry_button"
-                    android:drawableStart="@drawable/ic_retry"
-                    android:drawablePadding="8dp"
-                    android:paddingStart="18dp"
-                    android:paddingEnd="18dp"
-                    android:paddingTop="9dp"
-                    android:paddingBottom="9dp"
-                    android:text="@string/retry"
-                    android:textAllCaps="false"
-                    android:textColor="@color/bg"
-                    android:textSize="13sp"
-                    android:textStyle="bold"
-                    android:visibility="gone" />
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/playerRetryBtn"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:layout_gravity="start"
+                        android:background="@drawable/bg_retry_button"
+                        android:drawableStart="@drawable/ic_retry"
+                        android:drawablePadding="8dp"
+                        android:paddingStart="18dp"
+                        android:paddingEnd="18dp"
+                        android:paddingTop="9dp"
+                        android:paddingBottom="9dp"
+                        android:text="@string/retry"
+                        android:textAllCaps="false"
+                        android:textColor="@color/bg"
+                        android:textSize="13sp"
+                        android:textStyle="bold"
+                        android:visibility="gone" />
+
+                    <!-- MUHIM: "qaysi kanal, nima uchun ochilmadi" degan savolga
+                         100% aniq javob faqat taxmin qilish bilan emas, balki
+                         ExoPlayer/mpv'ning HAQIQIY xato tafsilotini ko'rish bilan
+                         topiladi. Bu tugma o'sha tafsilotni (kanal nomi, havola,
+                         HTTP javob kodi, qaysi bosqichda — soft/hard/mpv —
+                         yiqilgani) tayyor matn qilib, to'g'ridan-to'g'ri istalgan
+                         messenjerga (Telegram va h.k.) yuborish uchun ochadi —
+                         ekran suratiga qaraganda ancha aniq va tezroq. -->
+                    <Button
+                        android:id="@+id/playerDiagnosticsBtn"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:layout_marginStart="8dp"
+                        android:background="@drawable/bg_retry_button"
+                        android:paddingStart="18dp"
+                        android:paddingEnd="18dp"
+                        android:paddingTop="9dp"
+                        android:paddingBottom="9dp"
+                        android:text="@string/send_diagnostics"
+                        android:textAllCaps="false"
+                        android:textColor="@color/bg"
+                        android:textSize="13sp"
+                        android:textStyle="bold"
+                        android:visibility="gone" />
+                </LinearLayout>
             </LinearLayout>
 
         </FrameLayout>

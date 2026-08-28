@@ -7,6 +7,7 @@
     <string name="load_error">Xatolik: ro\'yxatni yuklab bo\'lmadi. Internetni tekshiring. (%1$s)</string>
     <string name="stream_error">Oqim xatoligi: %1$s hozircha mavjud emas</string>
     <string name="retry">Qayta urinish</string>
+    <string name="send_diagnostics">Diagnostikani yuborish</string>
 
     <string name="category_all">BARCHASI</string>
     <string name="category_other">BOSHQA</string>

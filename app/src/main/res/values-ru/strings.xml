@@ -7,6 +7,7 @@
     <string name="load_error">Ошибка: не удалось загрузить список. Проверьте интернет. (%1$s)</string>
     <string name="stream_error">Ошибка потока: %1$s сейчас недоступен</string>
     <string name="retry">Повторить</string>
+    <string name="send_diagnostics">Отправить диагностику</string>
 
     <string name="category_all">ВСЕ</string>
     <string name="category_other">ДРУГОЕ</string>
