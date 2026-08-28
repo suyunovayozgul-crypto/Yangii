@@ -129,6 +129,16 @@ class PlayerActivity : AppCompatActivity() {
     // abadiy "aylanib" qolish xavfi bor.
     private var mpvFallbackAttempted = false
 
+    // VAQTINCHALIK O'CHIRILGAN: haqiqiy bug-report'da tasdiqlandi — libmpv.so
+    // FFmpeg kutubxonalari (libavutil.so) bilan mos versiyada qurilmagan
+    // ("UnsatisfiedLinkError: cannot locate symbol av_default_item_name"),
+    // shu sabab mpv ishga tushishga uringanda BUTUN ILOVA qulab tushardi
+    // (bu Kotlin xatosi emas, native kutubxona xatosi — Java try/catch buni
+    // ushlay olmaydi). mpv/ffmpeg to'g'ri (bir-biriga mos versiyada) qayta
+    // qurilgunicha, bu bosqich butunlay chetlab o'tiladi — ExoPlayer'ning
+    // o'zi (soft retry + hard recover) davom etadi, faqat mpv urinilmaydi.
+    private val MPV_FALLBACK_ENABLED = false
+
     // ExoPlayer'ning watchdog/handlePlaybackError zanjiri mpv muvaffaqiyatli
     // ishga tushgandan keyin ham keyinroq ishga tushib, mpv orqali yaxshi
     // ko'rsatilayotgan videoni "xato" deb bosib qo'ymasligi uchun.
@@ -451,7 +461,7 @@ class PlayerActivity : AppCompatActivity() {
             lastFailStage = "hard-recover"
             statusHint(getString(R.string.stream_reconnecting))
             mainHandler.postDelayed({ hardRecoverSilently() }, 1500L)
-        } else if (!mpvFallbackAttempted) {
+        } else if (MPV_FALLBACK_ENABLED && !mpvFallbackAttempted) {
             mpvFallbackAttempted = true
             lastFailStage = "mpv-fallback"
             statusHint(getString(R.string.stream_reconnecting))
