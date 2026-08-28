@@ -1,6 +1,5 @@
 package com.signal.iptv
 
-import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.os.Build
 import android.os.Bundle
@@ -8,6 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import android.text.Editable
 import android.text.TextWatcher
+import android.util.Log
 import android.view.GestureDetector
 
 import android.view.KeyEvent
@@ -27,13 +27,13 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
-import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -43,8 +43,6 @@ import androidx.recyclerview.widget.RecyclerView
 import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.NextRenderersFactory
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import okhttp3.OkHttpClient
-import javax.net.ssl.X509TrustManager
-import okhttp3.Request
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.concurrent.Executors
@@ -62,45 +60,7 @@ class PlayerActivity : AppCompatActivity() {
     // urinishlar) uchun qayta ishlatiladi — ulanish poolini saqlab qolish
     // uchun bu muhim, har safar yangi OkHttpClient yaratish bu afzallikni
     // yo'qqa chiqaradi.
-    // Ko'p bepul IPTV panellari (masalan, ba'zi 4K/tort kanallarni beruvchi
-    // serverlar) HTTPS sertifikatini noto'g'ri sozlagan bo'ladi — sertifikat
-    // zanjiri to'liq emas yoki o'z-o'ziga imzolangan. Android'ning standart
-    // tekshiruvi buni "SSLHandshakeException: Trust anchor for certification
-    // path not found" deb rad etadi — bu ExoPlayer'da juda keng tarqalgan,
-    // hujjatlashtirilgan muammo (google/ExoPlayer#4383, #5009, #7786) va
-    // aynan "ba'zi kanallar ochiladi, ba'zilari ochilmaydi" holatiga to'g'ri
-    // keladi (faqat sertifikati chala serverlar ta'sirlanadi). VLC-asosli
-    // dasturlar (masalan Televizo) ko'pincha bunday xatolarni e'tiborsiz
-    // qoldiradi — biz ham xuddi shunday, faqat video oqimi uchun (boshqa
-    // hech qanday tarmoq so'rovi uchun emas), qilamiz.
-    private val lenientTrustManager = object : X509TrustManager {
-        override fun checkClientTrusted(chain: Array<out java.security.cert.X509Certificate>?, authType: String?) {}
-        override fun checkServerTrusted(chain: Array<out java.security.cert.X509Certificate>?, authType: String?) {}
-        override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = arrayOf()
-    }
-
-    // Ba'zi token-asosli oqimlar (masalan ?token=... bilan keladiganlar)
-    // birinchi so'rovda cookie/sessiya o'rnatadi va keyingi qayta
-    // yo'naltirishlarda (redirect) shu cookie'ni talab qiladi. Cookie
-    // saqlanmasa, server har safar "notanish" so'rovchi deb hisoblab,
-    // cheksiz qayta yo'naltirishda ("Too many redirects") ushlab qoladi —
-    // bu ExoPlayer'da aniq xato bermay, abadiy "buffering" bo'lib
-    // ko'rinadi. Oddiy xotiradagi (in-memory) CookieJar shu holatni
-    // tuzatadi — Televizo va boshqa to'liq brauzer-uslubidagi pleyerlar
-    // ham xuddi shunday ishlaydi.
-    private val inMemoryCookieJar = object : okhttp3.CookieJar {
-        private val store = mutableMapOf<String, List<okhttp3.Cookie>>()
-        override fun saveFromResponse(url: okhttp3.HttpUrl, cookies: List<okhttp3.Cookie>) {
-            store[url.host] = cookies
-        }
-        override fun loadForRequest(url: okhttp3.HttpUrl): List<okhttp3.Cookie> {
-            return store[url.host] ?: emptyList()
-        }
-    }
-
     private val okHttpClient: OkHttpClient by lazy {
-        val sslContext = javax.net.ssl.SSLContext.getInstance("TLS")
-        sslContext.init(null, arrayOf<javax.net.ssl.TrustManager>(lenientTrustManager), java.security.SecureRandom())
         OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
@@ -108,9 +68,44 @@ class PlayerActivity : AppCompatActivity() {
             .followRedirects(true)
             .followSslRedirects(true)
             .retryOnConnectionFailure(true)
-            .cookieJar(inMemoryCookieJar)
-            .sslSocketFactory(sslContext.socketFactory, lenientTrustManager)
-            .hostnameVerifier { _, _ -> true }
+            // mpv-android (ffmpeg asosida) va ko'p boshqa IPTV pleyerlar
+            // faqat HTTP/1.1 ishlatadi — OkHttp esa server qo'llasa HTTP/2'ga
+            // avtomatik o'tadi. Ba'zi IPTV-server/CDN'lar HTTP/2'da mijozga
+            // qarab (ayniqsa qayta ishlatiladigan ulanishlarda) noto'g'ri/
+            // buzilgan javob qaytarishi mumkin. Shuni chetlab o'tish uchun
+            // faqat HTTP/1.1'ga majburlaymiz — bu boshqa ishlayotgan
+            // pleyerlar (mpv, curl) qanday ulanayotganiga yaqinlashtiradi.
+            .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
+            // TASHXIS: har bir HTTP so'rov/javobning haqiqiy holatini
+            // (status kod, sarlavhalar, javob tanasining boshi) Logcat'ga
+            // yozib boradi. Bu orqali "nega #EXTM3U bilan boshlanmayapti"
+            // degan savolga taxmin emas, aynan qanday baytlar kelayotganini
+            // ko'ramiz — masalan operator tarmog'i (mobil internet) content'ni
+            // siqib/o'zgartirib yuborayotganmi, server chindan xato sahifa
+            // qaytarayaptimi, yoki boshqa narsami.
+            .addInterceptor { chain ->
+                val request = chain.request()
+                val response = chain.proceed(request)
+                try {
+                    val peek = response.peekBody(300)
+                    val bytes = peek.bytes()
+                    val asText = try {
+                        String(bytes, Charsets.UTF_8).replace("\n", "\\n").take(200)
+                    } catch (e: Exception) { "<matn emas>" }
+                    val hex = bytes.take(8).joinToString(" ") { "%02x".format(it) }
+                    Log.d(
+                        "HttpDebug",
+                        "${request.method} ${request.url} -> ${response.code} " +
+                            "content-type=${response.header("Content-Type")} " +
+                            "content-encoding=${response.header("Content-Encoding")} " +
+                            "content-length=${response.header("Content-Length")} " +
+                            "hex_boshi=[$hex] matn_boshi=\"$asText\""
+                    )
+                } catch (e: Exception) {
+                    Log.d("HttpDebug", "${request.method} ${request.url} -> ${response.code} (body o'qib bo'lmadi: ${e.message})")
+                }
+                response
+            }
             .build()
     }
 
@@ -130,39 +125,18 @@ class PlayerActivity : AppCompatActivity() {
     // ham yordam bermasa, foydalanuvchiga "Qayta urinish" tugmasi ko'rsatiladi.
     private var retryCount: Int = 0
     private var hardRecoverAttempted = false
+    private var lastErrorMessage: String = ""
 
-    // Ba'zi kanallar "titroq" ishlaydi: bir-ikki soniya o'ynaydi, uziladi,
-    // yana o'ynaydi... Agar retryCount har bir shunday qisqa "o'ynash"
-    // lahzasida DARHOL nolga tushirilsa, hisoblagich hech qachon
-    // maxSoftRetries'ga yetmaydi — va foydalanuvchi abadiy "Ulanish
-    // tiklanmoqda..." holatida qolib, "Qayta urinish" tugmasini hech qachon
-    // ko'rmaydi. Shu sabab hisoblagichni faqat oqim STABLE_PLAYBACK_MS
-    // davomida uzluksiz o'ynagandan KEYIN nolga tushiramiz.
-    private val stableRetryResetRunnable = Runnable {
-        retryCount = 0
-        hardRecoverAttempted = false
-    }
-
-    // ExoPlayer'ning barcha urinishlari (soft retry + hard recover) tugagach,
-    // libmpv zaxira dvigateli har bir kanal uchun FAQAT BIR MARTA sinaladi —
-    // aks holda mpv ham muvaffaqiyatsiz bo'lgan kanalda ikkalasi orasida
-    // abadiy "aylanib" qolish xavfi bor.
-    private var mpvFallbackAttempted = false
-
-    // VAQTINCHALIK O'CHIRILGAN: haqiqiy bug-report'da tasdiqlandi — libmpv.so
-    // FFmpeg kutubxonalari (libavutil.so) bilan mos versiyada qurilmagan
-    // ("UnsatisfiedLinkError: cannot locate symbol av_default_item_name"),
-    // shu sabab mpv ishga tushishga uringanda BUTUN ILOVA qulab tushardi
-    // (bu Kotlin xatosi emas, native kutubxona xatosi — Java try/catch buni
-    // ushlay olmaydi). mpv/ffmpeg to'g'ri (bir-biriga mos versiyada) qayta
-    // qurilgunicha, bu bosqich butunlay chetlab o'tiladi — ExoPlayer'ning
-    // o'zi (soft retry + hard recover) davom etadi, faqat mpv urinilmaydi.
-    private val MPV_FALLBACK_ENABLED = false
-
-    // ExoPlayer'ning watchdog/handlePlaybackError zanjiri mpv muvaffaqiyatli
-    // ishga tushgandan keyin ham keyinroq ishga tushib, mpv orqali yaxshi
-    // ko'rsatilayotgan videoni "xato" deb bosib qo'ymasligi uchun.
-    private var mpvPlaybackActive = false
+    // Playlist ba'zi kanallar uchun Referer ko'rsatmagan bo'lsa, ExoPlayer buni
+    // avtomatik "taxmin qilishi" kerak — lekin BITTA taxmin (masalan, oqimning
+    // o'z domeni) har doim to'g'ri kelavermaydi: ba'zi serverlar (oktv.uz kabi)
+    // playlist joylashgan "portal" saytini kutadi, ba'zilari umuman hech qanday
+    // Referer kutmaydi. Shuning uchun bir nechta variantni NAVBAT bilan sinab
+    // ko'ramiz — refererAttemptIndex shu navbatdagi o'rinni bildiradi va har bir
+    // muvaffaqiyatsiz urinishdan keyin (retryCount hisobiga kirmasdan) bittaga
+    // oshiriladi, referererCandidates() ro'yxati tugagach oddiy qayta urinish
+    // zanjiriga (softRetry/hardRecover) o'tadi.
+    private var refererAttemptIndex = 0
 
     // === "Abadiy yuklanish" qo'riqchisi ===
     // Ba'zi o'lik/geo-blok qilingan IPTV serverlar ulanishni na xato beradi,
@@ -188,8 +162,6 @@ class PlayerActivity : AppCompatActivity() {
 
     private lateinit var channelsOverlay: View
     private lateinit var playerView: PlayerView
-    private lateinit var mpvSurfaceView: android.view.SurfaceView
-    private var mpvFallback: MpvFallbackPlayer? = null
     private lateinit var overlayGroup: View
     private lateinit var titleView: TextView
     private lateinit var programView: TextView
@@ -197,14 +169,6 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var statsView: TextView
     private lateinit var streamErrorView: TextView
     private lateinit var retryBtn: Button
-    private lateinit var diagnosticsBtn: Button
-
-    // 100% aniq bilish uchun taxmin emas, HAQIQIY ma'lumot kerak: qaysi
-    // bosqich (soft retry / hard recover / mpv) yiqilgani, ExoPlayer'ning
-    // aynan qaysi xato kodi va — eng muhimi — agar bu HTTP javobi bo'lsa,
-    // aynan qaysi status kodi (403, 404, 451 va h.k.) qaytgani.
-    private var lastFailStage: String = ""
-    private var lastErrorDetail: String = ""
     private lateinit var resizeLabel: TextView
     private lateinit var categoryRail: LinearLayout
     private lateinit var searchBox: EditText
@@ -289,7 +253,7 @@ class PlayerActivity : AppCompatActivity() {
             group = intent.getStringExtra("channel_group") ?: "",
             tvgId = intent.getStringExtra("channel_tvgid") ?: "",
             userAgent = intent.getStringExtra("channel_useragent") ?: "",
-            referrer = intent.getStringExtra("channel_referrer") ?: ""
+            referer = intent.getStringExtra("channel_referrer") ?: ""
         )
 
         // MUHIM: ekran bir necha daqiqadan keyin o'zi o'chib/qulflanib qolsa,
@@ -299,7 +263,6 @@ class PlayerActivity : AppCompatActivity() {
 
         channelsOverlay = findViewById(R.id.channelsOverlay)
         playerView = findViewById(R.id.playerView)
-        mpvSurfaceView = findViewById(R.id.mpvSurfaceView)
         overlayGroup = findViewById(R.id.overlayGroup)
         titleView = findViewById(R.id.playerTitle)
         programView = findViewById(R.id.playerProgram)
@@ -308,9 +271,6 @@ class PlayerActivity : AppCompatActivity() {
         streamErrorView = findViewById(R.id.playerStreamError)
         retryBtn = findViewById(R.id.playerRetryBtn)
         retryBtn.stateListAnimator = null
-        diagnosticsBtn = findViewById(R.id.playerDiagnosticsBtn)
-        diagnosticsBtn.stateListAnimator = null
-        diagnosticsBtn.setOnClickListener { shareDiagnostics() }
         resizeLabel = findViewById(R.id.playerResizeLabel)
         categoryRail = findViewById(R.id.categoryRail)
         searchBox = findViewById(R.id.playerSearchBox)
@@ -412,8 +372,15 @@ class PlayerActivity : AppCompatActivity() {
         // MediaCodec dekoder buni har doim ham qo'llab-quvvatlamaydi (video ketadi,
         // ovoz esa sukut saqlaydi) — shu factory bo'lsa, ExoPlayer avtomatik ravishda
         // FFmpeg dasturiy dekoderiga o'tadi (avval hardware, keyin fallback sifatida).
+        // PREFER (ON emas): FFmpeg dasturiy dekoderi HAR DOIM birinchi sinaladi,
+        // platform passthrough decoderidan oldin. Ba'zi telefonlar AC-3/E-AC-3'ni
+        // "qo'llab-quvvatlayman" deb signal beradi-yu, aslida faqat passthrough
+        // (SPDIF/HDMI ARC ulangan TV/resiver kutadi) — telefon dinamigida esa hech
+        // narsa eshitilmaydi, garchi ExoPlayer buni xato deb hisoblamasa ham. PREFER
+        // bu holatni butunlay chetlab o'tadi: hamma AC-3/E-AC-3 kanal endi har doim
+        // dasturiy decode qilinadi, qurilmadan qat'i nazar bir xil natija beradi.
         val renderersFactory = NextRenderersFactory(this)
-            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
 
         // Jonli IPTV oqimlar uchun moslashtirilgan bufer: kanal ochilganda
         // tezroq boshlansin, internet birozgina sekinlashsa ham qayta-qayta
@@ -440,11 +407,33 @@ class PlayerActivity : AppCompatActivity() {
         playerView.resizeMode = resizeModes[resizeModeIndex]
         exoPlayer.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
-                lastErrorDetail = describeError(error)
+                // Xatoning aniq sababi (403, timeout, kodek, DNS va h.k.) shu yerda
+                // yo'qolib qolmasligi uchun logga yozamiz va ekranga chiqarish
+                // uchun saqlab qo'yamiz — aks holda faqat umumiy "ulanish
+                // tiklanmoqda" matni ko'rinadi va sababni bilib bo'lmaydi.
+                // "Source error" kabi umumiy xabar yetarli emas — cause zanjirini
+                // qazib, HTTP status kodi (masalan 403) yoki serverning aniq javob
+                // matni (masalan HTML xato sahifasi) bor bo'lsa, shuni chiqaramiz.
+                lastErrorMessage = "${error.errorCodeName}: ${describeRootCause(error)}"
+                val ch = currentChannel
+                val usedReferer = ch?.let { refererCandidates(it).getOrNull(refererAttemptIndex) } ?: "?"
+                Log.e(
+                    "PlayerError",
+                    "${ch?.name} url=${ch?.url} referer=\"$usedReferer\": $lastErrorMessage",
+                    error
+                )
                 handlePlaybackError()
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
+                val stateName = when (playbackState) {
+                    Player.STATE_IDLE -> "IDLE"
+                    Player.STATE_BUFFERING -> "BUFFERING"
+                    Player.STATE_READY -> "READY"
+                    Player.STATE_ENDED -> "ENDED"
+                    else -> playbackState.toString()
+                }
+                Log.d("PlayerDebug", "onPlaybackStateChanged -> $stateName (${currentChannel?.name})")
                 if (playbackState == Player.STATE_READY) {
                     cancelOpenWatchdog()
                 }
@@ -452,13 +441,36 @@ class PlayerActivity : AppCompatActivity() {
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying) {
+                    retryCount = 0
+                    hardRecoverAttempted = false
                     hideStreamError()
                     cancelOpenWatchdog()
-                    mainHandler.postDelayed(stableRetryResetRunnable, STABLE_PLAYBACK_MS)
-                } else {
-                    mainHandler.removeCallbacks(stableRetryResetRunnable)
                 }
                 updatePlayPauseIcon()
+            }
+        })
+
+        // DIAGNOSTIKA: qaysi dekoder (hardware MediaCodec yoki dasturiy FFmpeg)
+        // ishlatilayotganini Logcat'ga yozib boradi — "adb logcat -s DecoderCheck"
+        // bilan ko'rish mumkin. Nomida "ffmpeg" so'zi bo'lsa — FFmpeg dasturiy
+        // dekoder ishlagan, aks holda — telefonning o'z (hardware) dekoderi.
+        exoPlayer.addAnalyticsListener(object : AnalyticsListener {
+            override fun onAudioDecoderInitialized(
+                eventTime: AnalyticsListener.EventTime,
+                decoderName: String,
+                initializedTimestampMs: Long,
+                initializationDurationMs: Long
+            ) {
+                Log.d("DecoderCheck", "AUDIO decoder: $decoderName (${currentChannel?.name})")
+            }
+
+            override fun onVideoDecoderInitialized(
+                eventTime: AnalyticsListener.EventTime,
+                decoderName: String,
+                initializedTimestampMs: Long,
+                initializationDurationMs: Long
+            ) {
+                Log.d("DecoderCheck", "VIDEO decoder: $decoderName (${currentChannel?.name})")
             }
         })
     }
@@ -469,125 +481,56 @@ class PlayerActivity : AppCompatActivity() {
      * (og'irroq, lekin "osilib qolgan" holatlarni tuzatadi), va faqat shu ham
      * yordam bermasa — foydalanuvchiga "Qayta urinish" tugmasini ko'rsatish.
      */
+    /**
+     * ExoPlayer'ning "Source error" kabi umumiy xabari ortida ko'pincha aniqroq
+     * sabab yashiringan bo'ladi: masalan HttpDataSource.InvalidResponseCodeException
+     * ichida haqiqiy HTTP status kodi (403, 404...) va serverning javob tanasi
+     * (ko'pincha HTML xato sahifasi) bor. cause zanjirini pastga tushib, shularni
+     * topib, bitta o'qiladigan matnga aylantiramiz — shunda "nima yetishmayapti"
+     * taxmin emas, aniq fakt bo'ladi.
+     */
+    private fun describeRootCause(error: PlaybackException): String {
+        var cause: Throwable? = error
+        var deepest: Throwable = error
+        while (cause != null) {
+            deepest = cause
+            if (cause is androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException) {
+                val body = try {
+                    cause.responseBody?.toString(Charsets.UTF_8)?.take(200) ?: ""
+                } catch (e: Exception) { "" }
+                return "HTTP ${cause.responseCode} url=${cause.dataSpec.uri}" +
+                    if (body.isNotBlank()) " body=\"${body.replace("\n", " ")}\"" else ""
+            }
+            cause = cause.cause
+        }
+        return deepest.message ?: error.message ?: "noma'lum xato"
+    }
+
     private fun handlePlaybackError() {
         val channel = currentChannel ?: return
+        // Referer variantlari hali tugamagan bo'lsa — keyingisini darhol
+        // (retryCount hisobiga kirmasdan) sinab ko'ramiz. Ko'p hollarda muammo
+        // aynan noto'g'ri taxmin qilingan Referer/Origin bo'ladi — server buni
+        // "bot"likka o'xshab rad etib, HTML xato sahifasini qaytaradi (bu esa
+        // "buzilgan manifest" xatosiga olib keladi).
+        val candidateCount = refererCandidates(channel).size
+        if (refererAttemptIndex < candidateCount - 1) {
+            refererAttemptIndex++
+            statusHint(getString(R.string.stream_reconnecting))
+            mainHandler.postDelayed({ preparePlayback(channel) }, 500L)
+            return
+        }
         if (retryCount < maxSoftRetries) {
             retryCount++
-            lastFailStage = "soft-retry $retryCount/$maxSoftRetries"
             statusHint(getString(R.string.stream_reconnecting))
             mainHandler.postDelayed({ softRetry() }, 1500L * retryCount)
         } else if (!hardRecoverAttempted) {
             hardRecoverAttempted = true
-            lastFailStage = "hard-recover"
             statusHint(getString(R.string.stream_reconnecting))
             mainHandler.postDelayed({ hardRecoverSilently() }, 1500L)
-        } else if (MPV_FALLBACK_ENABLED && !mpvFallbackAttempted) {
-            mpvFallbackAttempted = true
-            lastFailStage = "mpv-fallback"
-            statusHint(getString(R.string.stream_reconnecting))
-            tryMpvFallback(channel)
         } else {
-            lastFailStage = "hammasi tugadi (soft+hard+mpv)"
             showStreamError(channel.name)
         }
-    }
-
-    /**
-     * ExoPlayer/mpv'ning xato sababini imkon qadar aniq matnga aylantiradi —
-     * jumladan HTTP javob kodini (403, 404, 451 va h.k.) sabab zanjiridan
-     * qidirib topadi. Bu "taxmin qilish"ni butunlay yo'qotadi: xato matni
-     * o'zi aynan nima sodir bo'lganini ko'rsatadi.
-     */
-    private fun describeError(error: Throwable): String {
-        var cause: Throwable? = error
-        var httpCode: Int? = null
-        var httpMessage: String? = null
-        while (cause != null) {
-            if (cause is androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException) {
-                httpCode = cause.responseCode
-                httpMessage = cause.responseMessage
-            }
-            cause = cause.cause
-        }
-        val base = if (error is PlaybackException) error.errorCodeName else error.javaClass.simpleName
-        val rootMsg = generateSequence(error) { it.cause }.lastOrNull()?.message ?: error.message
-        return buildString {
-            append(base)
-            if (httpCode != null) append(" | HTTP $httpCode ${httpMessage ?: ""}".trimEnd())
-            if (!rootMsg.isNullOrBlank()) append(" | $rootMsg")
-        }
-    }
-
-    /**
-     * Ekranda ko'rinib turgan kanal + oxirgi xato haqida to'liq texnik matn
-     * tayyorlab, Android'ning ulashish oynasini ochadi — foydalanuvchi buni
-     * bevosita Telegram/istalgan messenjer orqali yuborishi mumkin. Ekran
-     * suratidan farqli o'laroq, bu yerda HAQIQIY xato kodi, ishlatilgan
-     * User-Agent/Referer va qaysi bosqichda (soft/hard/mpv) yiqilgani —
-     * hammasi matn ko'rinishida, aniq va nusxa ko'chirish mumkin.
-     */
-    private fun shareDiagnostics() {
-        val channel = currentChannel ?: return
-        val referer = deriveReferer(channel)
-        val userAgent = channel.userAgent.ifBlank { M3UParser.BROWSER_USER_AGENT }
-        val report = buildString {
-            appendLine("Kanal: ${channel.name}")
-            appendLine("Havola: ${channel.url}")
-            appendLine("Bosqich: ${lastFailStage.ifBlank { "noma'lum" }}")
-            appendLine("Xato: ${lastErrorDetail.ifBlank { "noma'lum" }}")
-            appendLine("User-Agent: $userAgent")
-            appendLine("Referer: ${referer.ifBlank { "(yo'q)" }}")
-        }
-        val sendIntent = Intent(Intent.ACTION_SEND).apply {
-            type = "text/plain"
-            putExtra(Intent.EXTRA_TEXT, report)
-        }
-        startActivity(Intent.createChooser(sendIntent, getString(R.string.send_diagnostics)))
-    }
-
-    /**
-     * ExoPlayer taslim bo'lgandan keyingi OXIRGI chora: libmpv (FFmpeg) orqali
-     * xuddi shu havolani ochishga urinamiz. Muvaffaqiyatli bo'lsa — mpv'ning
-     * o'z sirtini ko'rsatib, ExoPlayer'ni orqaga suramiz. Muvaffaqiyatsiz
-     * bo'lsa — odatdagidek "Qayta urinish" xatosi ko'rsatiladi.
-     */
-    private fun tryMpvFallback(channel: Channel) {
-        val userAgent = channel.userAgent.ifBlank { M3UParser.BROWSER_USER_AGENT }
-        val referer = deriveReferer(channel)
-        val fallback = mpvFallback ?: MpvFallbackPlayer(
-            context = this,
-            surfaceView = mpvSurfaceView,
-            onReady = {
-                if (currentChannel?.url == channel.url) {
-                    mpvPlaybackActive = true
-                    cancelOpenWatchdog()
-                    player?.pause()
-                    playerView.visibility = View.GONE
-                    mpvSurfaceView.visibility = View.VISIBLE
-                    hideStreamError()
-                }
-            },
-            onFailed = { reason ->
-                android.util.Log.w("PlayerActivity", "mpv fallback ishlamadi: $reason")
-                lastErrorDetail = "mpv: $reason"
-                mpvPlaybackActive = false
-                if (currentChannel?.url == channel.url) {
-                    mpvSurfaceView.visibility = View.GONE
-                    playerView.visibility = View.VISIBLE
-                    showStreamError(channel.name)
-                }
-            },
-        ).also { mpvFallback = it }
-        fallback.play(channel.url, userAgent, referer)
-    }
-
-    /** mpv fallback'ni to'xtatadi va ExoPlayer sirtini qaytaradi. */
-    private fun stopMpvFallback(destroy: Boolean) {
-        mpvFallback?.stop(destroy)
-        if (destroy) mpvFallback = null
-        mpvPlaybackActive = false
-        mpvSurfaceView.visibility = View.GONE
-        playerView.visibility = View.VISIBLE
     }
 
     private fun softRetry() {
@@ -610,8 +553,6 @@ class PlayerActivity : AppCompatActivity() {
         hideStreamError()
         retryCount = 0
         hardRecoverAttempted = false
-        mpvFallbackAttempted = false
-        stopMpvFallback(destroy = false)
         player?.release()
         setupPlayer()
         val channel = currentChannel ?: return
@@ -637,113 +578,73 @@ class PlayerActivity : AppCompatActivity() {
      * yuboramiz — bu ko'plab "faqat brauzerdan kelayotganday" tekshiruvni
      * chetlab o'tadi (Televizo va boshqa ilovalar ham aynan shunday qiladi).
      */
-    private fun deriveReferer(channel: Channel): String {
-        if (channel.referrer.isNotBlank()) return channel.referrer
-        return try {
-            val uri = android.net.Uri.parse(channel.url)
-            "${uri.scheme}://${uri.host}/"
-        } catch (e: Exception) {
-            ""
-        }
-    }
-
     /**
-     * Ko'p IPTV panellari (ayniqsa eski Xtream-uslubidagi serverlar) URL'ga
-     * ".m3u8" kengaytmasini qo'yadi, lekin aslida haqiqiy HLS playlist
-     * o'rniga xom MPEG-TS baytlarini to'g'ridan-to'g'ri oqim sifatida
-     * yuboradi. ExoPlayer formatni FAQAT URL kengaytmasiga qarab tanlaydi —
-     * shu sabab bunday hollarda noto'g'ri ravishda HLS-parserga yuboradi va
-     * "does not start with #EXTM3U" xatosini beradi, garchi oqimning o'zi
-     * boshqa (masalan FFmpeg-asosli) pleyerlarda mutlaqo muammosiz ochilsa
-     * ham — chunki ular kengaytmaga emas, HAQIQIY dastlabki baytlarga qarab
-     * formatni aniqlaydi.
-     *
-     * Shu funksiya aynan shu narsani qiladi: playback boshlashdan oldin
-     * serverdan bir necha kilobayt so'raymiz (Range: bytes=0-2047) va:
-     *  - agar javob "#EXTM3U" bilan boshlansa → bu haqiqatan HLS,
-     *  - agar birinchi bayt 0x47 (MPEG-TS sinxron baytı) bo'lsa → xom TS,
-     *  - aks holda hech narsa demaymiz — standart (kengaytmaga asoslangan)
-     *    xatti-harakatga qaytamiz, hozir ishlab turgan kanallarni
-     *    buzmaslik uchun.
-     *
-     * Hidlash 4 soniyadan ortiq davom etsa yoki xato bersa ham xuddi shu —
-     * standart xatti-harakatga qaytamiz, hech qachon playback'ni to'xtatib
-     * turmaymiz.
+     * Sinab ko'riladigan Referer variantlari, eng ehtimolidan boshlab:
+     *   1) Playlist o'zi ko'rsatgan Referer (bo'lsa) — eng ishonchli, chunki
+     *      playlist muallifi buni maxsus shu kanal uchun ko'rsatgan.
+     *   2) Referer'siz — curl bilan tasdiqlangan: oktv.uz kabi serverlar
+     *      Referer'siz so'rovga to'g'ri javob beradi. Buni ATAYLAB ikkinchi
+     *      o'ringa qo'ydik (avval EMAS, domen taxminlaridan OLDIN) — chunki
+     *      noto'g'ri taxmin qilingan Referer serverni sekinlashtirib yoki
+     *      butunlay bloklab, vaqtni behuda sarflashi mumkin edi.
+     *   3-4) Domen taxminlari — faqat yuqoridagilar ishlamasa, oxirgi chora
+     *      sifatida sinaladi.
      */
-    private fun sniffMimeType(url: String, userAgent: String, referer: String): String? {
-        return try {
-            val requestBuilder = Request.Builder()
-                .url(url)
-                .header("User-Agent", userAgent)
-                .header("Range", "bytes=0-2047")
-            if (referer.isNotBlank()) {
-                requestBuilder
-                    .header("Referer", referer)
-                    .header("Origin", referer.trimEnd('/'))
-            }
-            val sniffClient = okHttpClient.newBuilder()
-                .connectTimeout(4, TimeUnit.SECONDS)
-                .readTimeout(4, TimeUnit.SECONDS)
-                .build()
-            sniffClient.newCall(requestBuilder.build()).execute().use { response ->
-                val source = response.body?.source() ?: return null
-                val ok = try {
-                    source.request(2048)
-                } catch (e: Exception) {
-                    true // qisqaroq oqim ham bo'lishi mumkin, baribir bor narsani tekshiramiz
-                }
-                val bytes = source.buffer.snapshot().toByteArray()
-                when {
-                    bytes.isEmpty() -> null
-                    bytes[0] == 0x47.toByte() -> MimeTypes.VIDEO_MP2T
-                    String(bytes, Charsets.ISO_8859_1).trimStart().startsWith("#EXTM3U") ->
-                        MimeTypes.APPLICATION_M3U8
-                    else -> null
-                }
-            }
-        } catch (e: Exception) {
-            null
-        }
+    private fun refererCandidates(channel: Channel): List<String> {
+        val list = mutableListOf<String>()
+        if (channel.referer.isNotBlank()) list.add(channel.referer)
+        list.add("")
+        try {
+            val portalUri = android.net.Uri.parse(MainActivity.PLAYLIST_URL)
+            list.add("${portalUri.scheme}://${portalUri.host}/")
+        } catch (e: Exception) { /* e'tiborsiz qoldiriladi */ }
+        try {
+            val uri = android.net.Uri.parse(channel.url)
+            list.add("${uri.scheme}://${uri.host}/")
+        } catch (e: Exception) { /* e'tiborsiz qoldiriladi */ }
+        return list.distinct()
     }
 
     private fun preparePlayback(channel: Channel) {
         val exoPlayer = player ?: return
         val userAgent = channel.userAgent.ifBlank { M3UParser.BROWSER_USER_AGENT }
-        val referer = deriveReferer(channel)
-
-        exoPlayer.stop()
-        exoPlayer.clearMediaItems()
-
-        // Hidlashni fon oqimida qilamiz — tarmoq so'rovi bo'lgani uchun
-        // asosiy (UI) oqimni bloklamasligi kerak.
-        executor.execute {
-            val sniffedMime = sniffMimeType(channel.url, userAgent, referer)
-            mainHandler.post {
-                // Shu orada foydalanuvchi boshqa kanalga o'tgan bo'lishi mumkin —
-                // bunday holda eski hidlash natijasini qo'llamaymiz.
-                if (currentChannel?.url != channel.url) return@post
-                val currentExoPlayer = player ?: return@post
-
-                val httpFactory = OkHttpDataSource.Factory(okHttpClient)
-                    .setUserAgent(userAgent)
-                if (referer.isNotBlank()) {
-                    httpFactory.setDefaultRequestProperties(
-                        mapOf("Referer" to referer, "Origin" to referer.trimEnd('/'))
-                    )
-                }
-
-                val mediaItemBuilder = MediaItem.Builder().setUri(channel.url)
-                if (sniffedMime != null) {
-                    mediaItemBuilder.setMimeType(sniffedMime)
-                }
-                val mediaSource = DefaultMediaSourceFactory(httpFactory)
-                    .createMediaSource(mediaItemBuilder.build())
-
-                currentExoPlayer.setMediaSource(mediaSource)
-                currentExoPlayer.prepare()
-                currentExoPlayer.playWhenReady = true
-                scheduleOpenWatchdog(channel)
+        val candidates = refererCandidates(channel)
+        val referer = candidates[refererAttemptIndex.coerceIn(0, candidates.size - 1)]
+        Log.d("PlayerDebug", "preparePlayback boshlandi: url=${channel.url} referer=\"$referer\" ua=\"$userAgent\"")
+        try {
+            val httpFactory = OkHttpDataSource.Factory(okHttpClient)
+                .setUserAgent(userAgent)
+            // Server "Range" so'ralganda OkHttp'ning avtomatik gzip-ochish
+            // mexanizmi ishlamay qoladi (OkHttp buni faqat Range yo'q paytda
+            // qiladi) — agar server shunda ham siqilgan javob yuborsa, ExoPlayer
+            // xom gzip baytlarini matn deb o'qib "#EXTM3U bilan boshlanmayapti"
+            // xatosini beradi. Buni butunlay oldini olish uchun serverdan hech
+            // qachon siqilgan javob so'ramaymiz.
+            val headers = mutableMapOf("Accept-Encoding" to "identity")
+            if (referer.isNotBlank()) {
+                headers["Referer"] = referer
+                headers["Origin"] = referer.trimEnd('/')
             }
+            httpFactory.setDefaultRequestProperties(headers)
+            val mediaSource = DefaultMediaSourceFactory(httpFactory)
+                .createMediaSource(MediaItem.fromUri(channel.url))
+
+            exoPlayer.stop()
+            exoPlayer.clearMediaItems()
+            exoPlayer.setMediaSource(mediaSource)
+            exoPlayer.prepare()
+            exoPlayer.playWhenReady = true
+            Log.d("PlayerDebug", "prepare() chaqirildi, holat hozir: ${exoPlayer.playbackState}")
+            scheduleOpenWatchdog(channel)
+        } catch (e: Exception) {
+            // Agar shu blok ichida biror narsa (masalan noto'g'ri URL formati)
+            // kutilmagan xato bersa — bu avvalgi kodda BUTUNLAY yashirin qolar
+            // edi (na onPlayerError, na watchdog ushlaydi, chunki hech qachon
+            // shu funksiyaning oxiriga yetib bormaydi). Endi buni ham ochiq
+            // ko'rsatamiz.
+            lastErrorMessage = "PREPARE_EXCEPTION: ${e.javaClass.simpleName}: ${e.message}"
+            Log.e("PlayerError", "preparePlayback xato berdi: url=${channel.url}", e)
+            handlePlaybackError()
         }
     }
 
@@ -758,14 +659,29 @@ class PlayerActivity : AppCompatActivity() {
         val runnable = Runnable {
             val exoPlayer = player
             if (exoPlayer != null && currentChannel?.url == channel.url &&
-                exoPlayer.playbackState != Player.STATE_READY &&
-                !mpvPlaybackActive
+                exoPlayer.playbackState != Player.STATE_READY
             ) {
-                // Bu holatda ExoPlayer hech qanday aniq xato bermagan —
-                // shunchaki OPEN_TIMEOUT_MS ichida hech narsa kelmadi. Buni
-                // "noma'lum" deb qoldirmasdan, aynan shu holatni yozib
-                // qo'yamiz — diagnostikada aniq ko'rinishi uchun.
-                lastErrorDetail = "Vaqt tugadi: ${OPEN_TIMEOUT_MS / 1000}s ichida server javob bermadi (jim qolgan ulanish)"
+                // Bu yerda ExoPlayer hech qanday xato bermagan — shunchaki
+                // OPEN_TIMEOUT_MS ichida STATE_READY'ga yetmadi. Sababsiz
+                // "hozircha mavjud emas" deb chiqaverish o'rniga, ExoPlayer'ning
+                // o'sha paytdagi holatini (IDLE/BUFFERING/ENDED, va hozirgача
+                // qancha ma'lumot yuklab olingani) yozib qo'yamiz — shu orqali
+                // "server umuman javob bermayapti"mi yoki "javob keladi-yu, juda
+                // sekin/tugamayapti"mi ekanini ajratib bo'ladi.
+                val stateName = when (exoPlayer.playbackState) {
+                    Player.STATE_IDLE -> "IDLE (hali so'rov boshlanmagan yoki tugagan)"
+                    Player.STATE_BUFFERING -> "BUFFERING (ma'lumot kutilmoqda)"
+                    Player.STATE_ENDED -> "ENDED"
+                    else -> exoPlayer.playbackState.toString()
+                }
+                val loadedMs = exoPlayer.bufferedPosition
+                val isLoading = exoPlayer.isLoading
+                lastErrorMessage = "WATCHDOG_TIMEOUT: $OPEN_TIMEOUT_MS ms ichida STATE_READY'ga yetmadi. " +
+                    "holat=$stateName, isLoading=$isLoading, bufferedPositionMs=$loadedMs"
+                Log.e(
+                    "PlayerError",
+                    "${channel.name} url=${channel.url} referer=\"${refererCandidates(channel).getOrNull(refererAttemptIndex)}\": $lastErrorMessage"
+                )
                 handlePlaybackError()
             }
         }
@@ -786,17 +702,15 @@ class PlayerActivity : AppCompatActivity() {
 
     private fun showStreamError(channelName: String) {
         streamErrorView.visibility = View.VISIBLE
-        val base = getString(R.string.stream_error, channelName)
-        streamErrorView.text = if (lastErrorDetail.isNotBlank()) "$base\n$lastErrorDetail" else base
+        val detail = if (lastErrorMessage.isNotBlank()) "\n$lastErrorMessage" else ""
+        streamErrorView.text = getString(R.string.stream_error, channelName) + detail
         retryBtn.visibility = View.VISIBLE
-        diagnosticsBtn.visibility = View.VISIBLE
         keepOverlayVisible()
     }
 
     private fun hideStreamError() {
         streamErrorView.visibility = View.GONE
         retryBtn.visibility = View.GONE
-        diagnosticsBtn.visibility = View.GONE
     }
 
     /**
@@ -971,11 +885,7 @@ class PlayerActivity : AppCompatActivity() {
         currentChannel = channel
         retryCount = 0
         hardRecoverAttempted = false
-        mpvFallbackAttempted = false
-        // Har bir yangi kanal ExoPlayer bilan BOSHIDAN boshlanadi — agar
-        // oldingi kanalda mpv fallback faol bo'lgan bo'lsa, uni yashirib,
-        // ExoPlayer sirtini qaytaramiz.
-        stopMpvFallback(destroy = false)
+        refererAttemptIndex = 0
         hideStreamError()
         titleView.text = channel.name
         updateProgramLabel()
@@ -1318,8 +1228,6 @@ class PlayerActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         mainHandler.removeCallbacksAndMessages(null)
-        mpvFallback?.stop(destroy = true)
-        mpvFallback = null
     }
 
     companion object {
@@ -1331,8 +1239,12 @@ class PlayerActivity : AppCompatActivity() {
         // Shu qadar vaqt ichida kanal STATE_READY'ga yetmasa — "abadiy
         // yuklanadigan" o'lik oqim deb qabul qilinadi va tiklash zanjiri
         // qo'lda ishga tushiriladi.
-        private const val OPEN_TIMEOUT_MS = 12_000L
-        private const val STABLE_PLAYBACK_MS = 5_000L
+        // Log dalillari shuni ko'rsatdiki, ba'zi kanallar (masalan AC-3 audio
+        // bilan keladiganlar) 12 soniyada emas, ancha ko'proq vaqtda READY
+        // holatiga yetadi — 12s ichida allaqachon 20s+ video buferga yig'ilgan
+        // bo'lsa ham hali READY emas edi. Shuning uchun soqchi vaqtini
+        // oshiramiz, aks holda ishlayotgan oqim erta "xato" deb e'lon qilinadi.
+        private const val OPEN_TIMEOUT_MS = 30_000L
         private val timeFormat = SimpleDateFormat("HH:mm", Locale.US)
     }
 }
