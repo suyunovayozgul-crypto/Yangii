@@ -48,21 +48,13 @@
     <string name="stream_reconnecting">Восстановление соединения…</string>
 
     <string name="menu_settings">Настройки</string>
-    <string name="channel_count_subtitle">%1$d каналов</string>
     <string name="settings_title">Настройки</string>
     <string name="settings_language_title">Язык приложения</string>
     <string name="settings_language_uz">O\'zbekcha</string>
     <string name="settings_language_ru">Русский</string>
-    <string name="settings_back">Назад</string>
-
-    <string name="settings_epg_title">Программа передач (EPG)</string>
-    <string name="settings_epg_hint">Если в другом приложении (например, Televizo) программа передач отображается, а здесь нет — вставьте сюда ту же ссылку EPG, что используете там.</string>
-    <string name="settings_epg_url_hint">Ссылка EPG (.xml или .xml.gz)</string>
-    <string name="settings_epg_save">Сохранить</string>
-    <string name="settings_epg_reset">Сбросить к стандартной</string>
-    <string name="settings_epg_saved">Ссылка EPG сохранена</string>
-    <string name="settings_epg_empty">Ссылка не может быть пустой</string>
     <string name="settings_other_title">Другое</string>
+    <string name="settings_telegram">Наш Telegram-канал</string>
+    <string name="settings_back">Назад</string>
 
     <string name="player_play_button">Воспроизвести</string>
     <string name="player_pause_button">Пауза</string>

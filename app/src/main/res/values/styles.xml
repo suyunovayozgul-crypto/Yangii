@@ -23,13 +23,4 @@
         <item name="android:layout_marginTop">6dp</item>
         <item name="android:layout_marginBottom">6dp</item>
     </style>
-
-    <!-- Audio-trek va EPG dialoglari uchun ilova ranglariga mos qorong'i tema. -->
-    <style name="SignalDialogTheme" parent="Theme.AppCompat.Dialog.Alert">
-        <item name="android:windowBackground">@color/panel</item>
-        <item name="android:textColorPrimary">@color/text</item>
-        <item name="android:textColorSecondary">@color/muted</item>
-        <item name="colorAccent">@color/amber</item>
-        <item name="android:background">@color/panel</item>
-    </style>
 </resources>

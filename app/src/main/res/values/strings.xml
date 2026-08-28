@@ -48,21 +48,13 @@
     <string name="stream_reconnecting">Ulanish tiklanmoqda…</string>
 
     <string name="menu_settings">Sozlamalar</string>
-    <string name="channel_count_subtitle">%1$d ta kanal</string>
     <string name="settings_title">Sozlamalar</string>
     <string name="settings_language_title">Ilova tili</string>
     <string name="settings_language_uz">O\'zbekcha</string>
     <string name="settings_language_ru">Русский</string>
-    <string name="settings_back">Orqaga</string>
-
-    <string name="settings_epg_title">Dastur jadvali (EPG)</string>
-    <string name="settings_epg_hint">Agar boshqa dasturda (masalan, Televizo) dastur jadvali chiqib, bu yerda chiqmasa — o\'sha yerda ishlatgan EPG havolangizni shu yerga qo\'ying.</string>
-    <string name="settings_epg_url_hint">EPG havolasi (.xml yoki .xml.gz)</string>
-    <string name="settings_epg_save">Saqlash</string>
-    <string name="settings_epg_reset">Standart holatga qaytarish</string>
-    <string name="settings_epg_saved">EPG havolasi saqlandi</string>
-    <string name="settings_epg_empty">Havola bo\'sh bo\'lishi mumkin emas</string>
     <string name="settings_other_title">Boshqa</string>
+    <string name="settings_telegram">Telegram kanalimiz</string>
+    <string name="settings_back">Orqaga</string>
 
     <string name="player_play_button">Ijro etish</string>
     <string name="player_pause_button">Pauza</string>

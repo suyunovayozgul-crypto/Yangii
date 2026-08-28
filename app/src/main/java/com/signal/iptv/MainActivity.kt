@@ -9,6 +9,7 @@ import android.text.Editable
 import android.text.TextWatcher
 import android.view.Gravity
 import android.view.View
+import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -37,19 +38,18 @@ class MainActivity : AppCompatActivity() {
 
     private var allChannels: List<Channel> = emptyList()
     private var categories: List<String> = emptyList()
-    private var currentCategory: String? = null // null = all (rail ko'rinishi)
+    private var currentCategory: String? = null // null = all
     private var searchTerm = ""
 
     private lateinit var drawerLayout: DrawerLayout
     private lateinit var toolbar: Toolbar
-    private lateinit var railsList: RecyclerView
+    private lateinit var tabsRow: LinearLayout
     private lateinit var recyclerView: RecyclerView
     private lateinit var statusText: TextView
     private lateinit var searchBox: EditText
     private lateinit var swipeRefresh: SwipeRefreshLayout
     private lateinit var drawerCategories: LinearLayout
     private lateinit var adapter: ChannelAdapter
-    private lateinit var railAdapter: CategoryRailAdapter
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -57,7 +57,7 @@ class MainActivity : AppCompatActivity() {
 
         drawerLayout = findViewById(R.id.drawerLayout)
         toolbar = findViewById(R.id.toolbar)
-        railsList = findViewById(R.id.railsList)
+        tabsRow = findViewById(R.id.tabsRow)
         recyclerView = findViewById(R.id.channelList)
         statusText = findViewById(R.id.statusText)
         searchBox = findViewById(R.id.searchBox)
@@ -91,7 +91,7 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
 
-        val openChannel = { channel: Channel ->
+        adapter = ChannelAdapter(emptyList()) { channel, _ ->
             val intent = Intent(this, PlayerActivity::class.java)
             intent.putExtra("channel_name", channel.name)
             intent.putExtra("channel_url", channel.url)
@@ -99,21 +99,11 @@ class MainActivity : AppCompatActivity() {
             intent.putExtra("channel_tvgid", channel.tvgId)
             intent.putExtra("channel_logo", channel.logo)
             intent.putExtra("channel_useragent", channel.userAgent)
-            intent.putExtra("channel_referrer", channel.referer)
+            intent.putExtra("channel_referrer", channel.referrer)
             startActivity(intent)
         }
-        adapter = ChannelAdapter(emptyList()) { channel, _ -> openChannel(channel) }
         recyclerView.layoutManager = LinearLayoutManager(this)
         recyclerView.adapter = adapter
-
-        railAdapter = CategoryRailAdapter(
-            sections = emptyList(),
-            selectedUrlProvider = { "" },
-            onChannelClick = openChannel,
-            recycledViewPool = RecyclerView.RecycledViewPool()
-        )
-        railsList.layoutManager = LinearLayoutManager(this)
-        railsList.adapter = railAdapter
 
         swipeRefresh.setOnRefreshListener { fetchPlaylist() }
 
@@ -121,16 +111,13 @@ class MainActivity : AppCompatActivity() {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
                 searchTerm = s?.toString()?.trim()?.lowercase() ?: ""
-                render()
+                applyFilter()
             }
             override fun afterTextChanged(s: Editable?) {}
         })
 
         fetchPlaylist()
-        EpgRepository.ensureLoaded(EPG_URL) {
-            adapter.refreshEpgRows()
-            railsList.post { railAdapter.refreshVisibleRails(railsList) }
-        }
+        EpgRepository.ensureLoaded(EPG_URL) { adapter.refreshEpgRows() }
         startEpgRowRefreshLoop()
     }
 
@@ -139,7 +126,6 @@ class MainActivity : AppCompatActivity() {
         mainHandler.postDelayed(object : Runnable {
             override fun run() {
                 adapter.refreshEpgRows()
-                railAdapter.refreshVisibleRails(railsList)
                 mainHandler.postDelayed(this, EPG_ROW_REFRESH_MS)
             }
         }, EPG_ROW_REFRESH_MS)
@@ -204,8 +190,47 @@ class MainActivity : AppCompatActivity() {
             .distinct()
             .sorted()
 
+        buildTabs()
         buildDrawerCategories()
-        render()
+        applyFilter()
+    }
+
+    private fun buildTabs() {
+        tabsRow.removeAllViews()
+        tabsRow.addView(makeTabButton(getString(R.string.category_all), currentCategory == null) {
+            selectCategory(null)
+        })
+        categories.forEach { cat ->
+            tabsRow.addView(makeTabButton(cat.uppercase(), currentCategory == cat) {
+                selectCategory(cat)
+            })
+        }
+    }
+
+    private fun makeTabButton(label: String, selected: Boolean, onClick: () -> Unit): Button {
+        val btn = Button(this)
+        btn.text = label
+        btn.textSize = 12f
+        btn.setPadding(36, 16, 36, 16)
+        btn.isAllCaps = true
+        btn.stateListAnimator = null
+        btn.minWidth = 0
+        btn.minimumWidth = 0
+        btn.setBackgroundResource(if (selected) R.drawable.tab_chip_selected else R.drawable.tab_chip_unselected)
+        btn.setTextColor(
+            ContextCompat.getColor(this, if (selected) R.color.bg else R.color.text)
+        )
+        val margin = (8 * resources.displayMetrics.density).toInt()
+        val params = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        )
+        params.marginStart = margin
+        params.topMargin = margin / 2
+        params.bottomMargin = margin / 2
+        btn.layoutParams = params
+        btn.setOnClickListener { onClick() }
+        return btn
     }
 
     private fun buildDrawerCategories() {
@@ -234,52 +259,29 @@ class MainActivity : AppCompatActivity() {
     private fun selectCategory(cat: String?) {
         if (currentCategory == cat) return
         currentCategory = cat
+        buildTabs()
         buildDrawerCategories()
-        render()
+        applyFilter()
     }
 
-    /**
-     * Ikki ko'rinish rejimi bor:
-     * — RAIL (bosh holat): toifa tanlanmagan va qidiruv bo'sh bo'lsa — OwnTV/Netflix
-     *   uslubidagi gorizontal rail'lar, har toifa alohida qator.
-     * — TEKIS RO'YXAT: qidiruv yozilganda yoki drawer'dan bitta toifa tanlanganda —
-     *   o'sha toifa/qidiruv natijasi to'liq tik ro'yxat sifatida ko'rsatiladi
-     *   (rail bitta toifani "chuqur" ko'rish uchun noqulay bo'lardi).
-     */
-    private fun render() {
-        val showRails = currentCategory == null && searchTerm.isEmpty()
-        if (showRails) {
-            railsList.visibility = View.VISIBLE
-            recyclerView.visibility = View.GONE
-            if (allChannels.isEmpty()) {
-                statusText.visibility = View.VISIBLE
-                statusText.text = getString(R.string.no_channels)
-            } else {
-                statusText.visibility = View.GONE
-                val sections = categories.map { cat ->
-                    CategorySection(cat, allChannels.filter { it.group.equals(cat, ignoreCase = true) })
-                }
-                railAdapter.updateData(sections)
-            }
+    private fun applyFilter() {
+        var filtered = if (currentCategory == null) {
+            allChannels
         } else {
-            railsList.visibility = View.GONE
+            allChannels.filter { it.group.equals(currentCategory, ignoreCase = true) }
+        }
+        if (searchTerm.isNotEmpty()) {
+            filtered = filtered.filter { it.name.lowercase().contains(searchTerm) }
+        }
+
+        if (filtered.isEmpty()) {
+            statusText.visibility = View.VISIBLE
+            recyclerView.visibility = View.GONE
+            statusText.text = getString(R.string.no_channels)
+        } else {
+            statusText.visibility = View.GONE
             recyclerView.visibility = View.VISIBLE
-            var filtered = if (currentCategory == null) {
-                allChannels
-            } else {
-                allChannels.filter { it.group.equals(currentCategory, ignoreCase = true) }
-            }
-            if (searchTerm.isNotEmpty()) {
-                filtered = filtered.filter { it.name.lowercase().contains(searchTerm) }
-            }
-            if (filtered.isEmpty()) {
-                statusText.visibility = View.VISIBLE
-                recyclerView.visibility = View.GONE
-                statusText.text = getString(R.string.no_channels)
-            } else {
-                statusText.visibility = View.GONE
-                adapter.updateData(filtered)
-            }
+            adapter.updateData(filtered)
         }
     }
 

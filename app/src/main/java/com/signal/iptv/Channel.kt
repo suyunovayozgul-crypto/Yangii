@@ -6,10 +6,10 @@ data class Channel(
     val logo: String = "",
     val group: String = "",
     val tvgId: String = "",
-    // Ba'zi kanallar faqat maxsus User-Agent/Referer bilan ochiladi (playlist ichida
-    // #EXTVLCOPT yoki #EXTHTTP orqali berilgan bo'ladi). Bo'sh bo'lsa, standart brauzer
-    // User-Agent ishlatiladi. Aynan shu narsa "boshqa dasturda ochadi, bunda ochmaydi"
-    // holatlarining eng keng tarqalgan sababi.
+    // Ba'zi IPTV serverlari faqat o'ziga xos User-Agent yoki Referer bilan
+    // kelgan so'rovlarni qabul qiladi (playlist shu ma'lumotni #EXTVLCOPT
+    // qatorlarida yoki URL oxiridagi |User-Agent=...&Referer=... ko'rinishida
+    // beradi). Bo'sh bo'lsa, umumiy standart brauzer sarlavhalari ishlatiladi.
     val userAgent: String = "",
-    val referer: String = ""
+    val referrer: String = ""
 )
