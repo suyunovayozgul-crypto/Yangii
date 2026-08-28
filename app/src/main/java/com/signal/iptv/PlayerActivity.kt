@@ -542,16 +542,20 @@ class PlayerActivity : AppCompatActivity() {
      */
     /**
      * Sinab ko'riladigan Referer variantlari, eng ehtimolidan boshlab:
-     *   1) Playlist o'zi ko'rsatgan Referer (bo'lsa) — eng ishonchli.
-     *   2) Playlist joylashgan "portal" domeni (masalan mirovoytv.uz) — ko'plab
-     *      IPTV-provayderlar aynan shu saytga sotilgan/ulangan bo'ladi va
-     *      Referer sifatida shuni kutadi (oqimning o'z domeni EMAS).
-     *   3) Oqimning o'z domeni — ba'zi boshqa provayderlar buni kutadi.
-     *   4) Referer'siz — ba'zi serverlar hech qanday Referer kutmaydi.
+     *   1) Playlist o'zi ko'rsatgan Referer (bo'lsa) — eng ishonchli, chunki
+     *      playlist muallifi buni maxsus shu kanal uchun ko'rsatgan.
+     *   2) Referer'siz — curl bilan tasdiqlangan: oktv.uz kabi serverlar
+     *      Referer'siz so'rovga to'g'ri javob beradi. Buni ATAYLAB ikkinchi
+     *      o'ringa qo'ydik (avval EMAS, domen taxminlaridan OLDIN) — chunki
+     *      noto'g'ri taxmin qilingan Referer serverni sekinlashtirib yoki
+     *      butunlay bloklab, vaqtni behuda sarflashi mumkin edi.
+     *   3-4) Domen taxminlari — faqat yuqoridagilar ishlamasa, oxirgi chora
+     *      sifatida sinaladi.
      */
     private fun refererCandidates(channel: Channel): List<String> {
         val list = mutableListOf<String>()
         if (channel.referer.isNotBlank()) list.add(channel.referer)
+        list.add("")
         try {
             val portalUri = android.net.Uri.parse(MainActivity.PLAYLIST_URL)
             list.add("${portalUri.scheme}://${portalUri.host}/")
@@ -560,7 +564,6 @@ class PlayerActivity : AppCompatActivity() {
             val uri = android.net.Uri.parse(channel.url)
             list.add("${uri.scheme}://${uri.host}/")
         } catch (e: Exception) { /* e'tiborsiz qoldiriladi */ }
-        list.add("")
         return list.distinct()
     }
 
@@ -1191,6 +1194,11 @@ class PlayerActivity : AppCompatActivity() {
         // Shu qadar vaqt ichida kanal STATE_READY'ga yetmasa — "abadiy
         // yuklanadigan" o'lik oqim deb qabul qilinadi va tiklash zanjiri
         // qo'lda ishga tushiriladi.
+        // Log dalillari shuni ko'rsatdiki, ba'zi kanallar (masalan AC-3 audio
+        // bilan keladiganlar) 12 soniyada emas, ancha ko'proq vaqtda READY
+        // holatiga yetadi — 12s ichida allaqachon 20s+ video buferga yig'ilgan
+        // bo'lsa ham hali READY emas edi. Shuning uchun soqchi vaqtini
+        // oshiramiz, aks holda ishlayotgan oqim erta "xato" deb e'lon qilinadi.
         private const val OPEN_TIMEOUT_MS = 30_000L
         private val timeFormat = SimpleDateFormat("HH:mm", Locale.US)
     }
