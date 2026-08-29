@@ -77,36 +77,6 @@ class PlayerActivity : AppCompatActivity() {
             // faqat HTTP/1.1'ga majburlaymiz — bu boshqa ishlayotgan
             // pleyerlar (mpv, curl) qanday ulanayotganiga yaqinlashtiradi.
             .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
-            // TASHXIS: har bir HTTP so'rov/javobning haqiqiy holatini
-            // (status kod, sarlavhalar, javob tanasining boshi) Logcat'ga
-            // yozib boradi. Bu orqali "nega #EXTM3U bilan boshlanmayapti"
-            // degan savolga taxmin emas, aynan qanday baytlar kelayotganini
-            // ko'ramiz — masalan operator tarmog'i (mobil internet) content'ni
-            // siqib/o'zgartirib yuborayotganmi, server chindan xato sahifa
-            // qaytarayaptimi, yoki boshqa narsami.
-            .addInterceptor { chain ->
-                val request = chain.request()
-                val response = chain.proceed(request)
-                try {
-                    val peek = response.peekBody(300)
-                    val bytes = peek.bytes()
-                    val asText = try {
-                        String(bytes, Charsets.UTF_8).replace("\n", "\\n").take(200)
-                    } catch (e: Exception) { "<matn emas>" }
-                    val hex = bytes.take(8).joinToString(" ") { "%02x".format(it) }
-                    Log.d(
-                        "HttpDebug",
-                        "${request.method} ${request.url} -> ${response.code} " +
-                            "content-type=${response.header("Content-Type")} " +
-                            "content-encoding=${response.header("Content-Encoding")} " +
-                            "content-length=${response.header("Content-Length")} " +
-                            "hex_boshi=[$hex] matn_boshi=\"$asText\""
-                    )
-                } catch (e: Exception) {
-                    Log.d("HttpDebug", "${request.method} ${request.url} -> ${response.code} (body o'qib bo'lmadi: ${e.message})")
-                }
-                response
-            }
             .build()
     }
 
@@ -481,6 +451,26 @@ class PlayerActivity : AppCompatActivity() {
             ) {
                 Log.d("DecoderCheck", "VIDEO decoder: $decoderName (${currentChannel?.name})")
             }
+
+            // TASHXIS: manifest/segment yuklashda (ExoPlayer ichki HTTP
+            // qatlamida) yuz bergan xatoni to'g'ridan-to'g'ri ushlab, sababini
+            // Logcat'ga yozadi — bu onPlayerError() chaqirilishidan OLDIN,
+            // ba'zan undan ancha batafsil (masalan aniq qaysi segment, necha
+            // marta qayta urinilgani) ma'lumot beradi.
+            override fun onLoadError(
+                eventTime: AnalyticsListener.EventTime,
+                loadEventInfo: androidx.media3.exoplayer.source.LoadEventInfo,
+                mediaLoadData: androidx.media3.exoplayer.source.MediaLoadData,
+                error: java.io.IOException,
+                wasCanceled: Boolean
+            ) {
+                Log.e(
+                    "ExoPlayerLoadError",
+                    "${currentChannel?.name} uri=${loadEventInfo.uri} " +
+                        "wasCanceled=$wasCanceled: ${error.message}",
+                    error
+                )
+            }
         })
     }
 
@@ -681,7 +671,17 @@ class PlayerActivity : AppCompatActivity() {
             val headers = mutableMapOf("Accept-Encoding" to "identity")
             if (referer.isNotBlank()) {
                 headers["Referer"] = referer
-                headers["Origin"] = referer.trimEnd('/')
+                // Origin — HTTP standartiga ko'ra FAQAT "sxema://host[:port]"
+                // bo'lishi kerak, yo'l (path) qismisiz. referer.trimEnd('/')
+                // agar referer'da yo'l bo'lsa (masalan "https://site.uz/sahifa/")
+                // buni noto'g'ri "https://site.uz/sahifa" qilib qoldirar edi —
+                // ba'zi serverlar buni tekshirib, mos kelmasa rad etadi.
+                headers["Origin"] = try {
+                    val uri = android.net.Uri.parse(referer)
+                    "${uri.scheme}://${uri.host}"
+                } catch (e: Exception) {
+                    referer.trimEnd('/')
+                }
             }
             httpFactory.setDefaultRequestProperties(headers)
             val mediaSource = DefaultMediaSourceFactory(httpFactory)
