@@ -12,6 +12,7 @@ import android.view.GestureDetector
 
 import android.view.KeyEvent
 import android.view.MotionEvent
+import android.view.SurfaceView
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
@@ -169,6 +170,13 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var statsView: TextView
     private lateinit var streamErrorView: TextView
     private lateinit var retryBtn: Button
+    private lateinit var mpvSurfaceView: SurfaceView
+    // Faqat ExoPlayer BARCHA urinishlaridan (referer variantlari + soft + hard
+    // recover) keyin ham ochib bo'lmagan kanalda, oxirgi chora sifatida
+    // yaratiladi (lazy) — chunki libmpv'ni ishga tushirish o'zi biroz og'ir,
+    // aksariyat kanallarda umuman kerak bo'lmaydi.
+    private var mpvFallbackPlayer: MpvFallbackPlayer? = null
+    private var mpvActive = false
     private lateinit var resizeLabel: TextView
     private lateinit var categoryRail: LinearLayout
     private lateinit var searchBox: EditText
@@ -270,6 +278,7 @@ class PlayerActivity : AppCompatActivity() {
         statsView = findViewById(R.id.playerStats)
         streamErrorView = findViewById(R.id.playerStreamError)
         retryBtn = findViewById(R.id.playerRetryBtn)
+        mpvSurfaceView = findViewById(R.id.mpvSurfaceView)
         retryBtn.stateListAnimator = null
         resizeLabel = findViewById(R.id.playerResizeLabel)
         categoryRail = findViewById(R.id.categoryRail)
@@ -528,9 +537,57 @@ class PlayerActivity : AppCompatActivity() {
             hardRecoverAttempted = true
             statusHint(getString(R.string.stream_reconnecting))
             mainHandler.postDelayed({ hardRecoverSilently() }, 1500L)
+        } else if (!mpvActive) {
+            // ExoPlayer'ning barcha imkoniyatlari (referer variantlari, soft
+            // retry, hard recover) tugadi — endi FFmpeg demuxeriga asoslangan
+            // libmpv'ni oxirgi chora sifatida sinaymiz.
+            tryMpvFallback(channel)
         } else {
             showStreamError(channel.name)
         }
+    }
+
+    /**
+     * ExoPlayer hech qanday urinishdan keyin ham ochib bo'lolmagan kanal uchun
+     * OXIRGI chora — libmpv (FFmpeg demuxeri) orqali sinab ko'radi. Bu ham
+     * muvaffaqiyatsiz bo'lsagina, foydalanuvchiga "Qayta urinish" ekrani
+     * ko'rsatiladi.
+     */
+    private fun tryMpvFallback(channel: Channel) {
+        mpvActive = true
+        statusHint(getString(R.string.stream_reconnecting))
+        player?.pause()
+        playerView.visibility = View.INVISIBLE
+        mpvSurfaceView.visibility = View.VISIBLE
+
+        val userAgent = channel.userAgent.ifBlank { M3UParser.BROWSER_USER_AGENT }
+        val referer = refererCandidates(channel).firstOrNull { it.isNotBlank() } ?: ""
+
+        val fallback = mpvFallbackPlayer ?: MpvFallbackPlayer(
+            context = this,
+            surfaceView = mpvSurfaceView,
+            onReady = {
+                hideStreamError()
+            },
+            onFailed = { reason ->
+                Log.e("PlayerError", "${channel.name}: mpv ham ocholmadi — $reason")
+                mpvSurfaceView.visibility = View.GONE
+                playerView.visibility = View.VISIBLE
+                showStreamError(channel.name)
+            }
+        ).also { mpvFallbackPlayer = it }
+
+        fallback.play(channel.url, userAgent, referer)
+    }
+
+    /** ExoPlayer'ga qaytishdan oldin (yangi kanal yoki qo'lda qayta urinishda)
+     * faol mpv ijrosini to'xtatib, ko'rinishni playerView'ga qaytaradi. */
+    private fun stopMpvFallback() {
+        if (!mpvActive) return
+        mpvActive = false
+        mpvFallbackPlayer?.stop(destroy = false)
+        mpvSurfaceView.visibility = View.GONE
+        playerView.visibility = View.VISIBLE
     }
 
     private fun softRetry() {
@@ -551,6 +608,7 @@ class PlayerActivity : AppCompatActivity() {
     /** Foydalanuvchi "Qayta urinish" tugmasini bosganda chaqiriladi. */
     private fun hardRecover() {
         hideStreamError()
+        stopMpvFallback()
         retryCount = 0
         hardRecoverAttempted = false
         player?.release()
@@ -886,6 +944,7 @@ class PlayerActivity : AppCompatActivity() {
         retryCount = 0
         hardRecoverAttempted = false
         refererAttemptIndex = 0
+        stopMpvFallback()
         hideStreamError()
         titleView.text = channel.name
         updateProgramLabel()
@@ -1223,6 +1282,9 @@ class PlayerActivity : AppCompatActivity() {
         cancelOpenWatchdog()
         player?.release()
         player = null
+        mpvFallbackPlayer?.stop(destroy = true)
+        mpvFallbackPlayer = null
+        mpvActive = false
     }
 
     override fun onDestroy() {
