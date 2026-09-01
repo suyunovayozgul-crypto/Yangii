@@ -65,6 +65,16 @@ class VlcFallbackPlayer(
             mediaPlayer = mp
 
             val vout = mp.vlcVout
+            // MUHIM: SurfaceView odatiy holatda oynaning ENG ORQA qatlamida
+            // chiziladi (bu Android'ning o'zi shunday ishlaydi — XML'dagi
+            // tartibga bog'liq emas). Agar buni ustiga chiqarmasak, video
+            // aslida ishlab tursa ham, boshqa qatlam(lar) uni "yopib" qo'yadi
+            // va faqat qora ekran ko'rinadi — ovoz esa bunga bog'liq emas,
+            // shuning uchun normal eshitiladi. setZOrderMediaOverlay(true)
+            // videoni old qatlamga chiqaradi, lekin boshqa overlay
+            // (masalan xato matni, boshqaruv tugmalari) hali ham uning
+            // ustida ko'rinishda qoladi.
+            surfaceView.setZOrderMediaOverlay(true)
             vout.setVideoView(surfaceView)
             vout.attachViews()
 
