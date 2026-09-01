@@ -27,7 +27,7 @@ import java.util.concurrent.Executors
 class MainActivity : AppCompatActivity() {
 
     companion object {
-        const val PLAYLIST_URL = "https://oktv.uz/1x1WjiMO.m3u8"
+        const val PLAYLIST_URL = "https://ru.oktv.uz/TWBg4kQP.m3u8"
         const val TELEGRAM_URL = "https://t.me/mirovoytvuz"
         const val EPG_URL = "https://iptvx.one/epg/epg_lite.xml.gz"
         private const val EPG_ROW_REFRESH_MS = 60_000L
