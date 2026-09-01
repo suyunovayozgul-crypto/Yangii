@@ -9,10 +9,8 @@ android {
 
     defaultConfig {
         applicationId "com.signal.iptv"
-        // libmpv (dev.jdtech.mpv) kutubxonasi minSdk 26 talab qiladi — pastroq
-        // qiymat bilan manifest merge bosqichida build butunlay yiqilardi
-        // ("uses-sdk:minSdkVersion 23 cannot be smaller than version 26").
-        // 26 (Android 8.0) dan pastroq qurilmalar allaqachon juda kam qolgan.
+        // Android 8.0 (API 26) dan pastroq qurilmalar allaqachon juda kam
+        // qolgan — shu chegara boshqa kutubxonalar bilan ham mos keladi.
         minSdk 26
         targetSdk 36
         versionCode 1
@@ -94,13 +92,17 @@ dependencies {
     // shu kutubxona bo'lmasa video ketadi-yu, ovoz sukut saqlaydi.
     implementation 'io.github.anilbeesetti:nextlib-media3ext:1.10.1-0.13.0'
 
-    // libmpv (FFmpeg) — ExoPlayer BARCHA qayta urinishlaridan keyin ham
-    // ochilmagan kanallar uchun OXIRGI chora zaxira dvigatel. ExoPlayer'ning
-    // Java-da yozilgan TS-parseri ba'zi "notekis" MPEG-TS oqimlarda hech
-    // qanday xato bermay abadiy buffering holatida qolib ketadi — FFmpeg'ning
-    // demuxeri esa xuddi shunday oqimlarga chidamli (VLC/TiviMate shu sabab
-    // ochadi). Faqat MpvFallbackPlayer orqali, kamdan-kam holatda ishlatiladi.
-    implementation 'dev.jdtech.mpv:libmpv:1.0.0'
+    // libVLC — ExoPlayer BARCHA qayta urinishlaridan keyin ham ochilmagan
+    // kanallar uchun OXIRGI chora zaxira dvigatel. ExoPlayer'ning Java-da
+    // yozilgan TS-parseri ba'zi "notekis" MPEG-TS oqimlarda hech qanday xato
+    // bermay abadiy buffering holatida qolib ketadi — VLC'ning demuxeri esa
+    // xuddi shunday oqimlarga chidamli (Televizo/TiviMate shu sababdan
+    // ochadi — sinovda aynan shu dvigatel muammoli kanallarni ochgani
+    // tasdiqlangan). Faqat VlcFallbackPlayer orqali, kamdan-kam holatda
+    // ishlatiladi. abiFilters yuqorida x86/x86_64'ni chiqarib tashlagani
+    // uchun bu kutubxona ham faqat ARM versiyalarda paketlanadi (hajm katta
+    // o'smaydi).
+    implementation 'org.videolan.android:libvlc-all:3.6.0'
 
     // Channel logos
     implementation 'com.github.bumptech.glide:glide:4.16.0'
