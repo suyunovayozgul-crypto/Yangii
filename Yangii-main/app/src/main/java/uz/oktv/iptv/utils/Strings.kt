@@ -20,7 +20,7 @@ object Strings {
         "live" to mapOf(AppLang.RU to "Прямой эфир", AppLang.UZ to "Jonli efir", AppLang.EN to "Live Stream", AppLang.UK to "Прямий ефір", AppLang.TR to "Canlı Yayın"),
         "epg_schedule" to mapOf(AppLang.RU to "ТЕЛЕПРОГРАММА НА НЕДЕЛЮ", AppLang.UZ to "HAFTALIK TELEDASTUR", AppLang.EN to "WEEKLY EPG SCHEDULE", AppLang.UK to "ТИЖНЕВА ТЕЛЕПРОГРАМА", AppLang.TR to "HAFTALIK YAYIN AKIŞI"),
         "select_category" to mapOf(AppLang.RU to "ВЫБОР КАТЕГОРИИ", AppLang.UZ to "KATEGORIYA TANLASH", AppLang.EN to "SELECT CATEGORY", AppLang.UK to "ВИБІР КАТЕГОРІЇ", AppLang.TR to "KATEGORİ SEÇİN"),
-        "speed_test_title" to mapOf(AppLang.RU to "Тест скорости сети OK TV", AppLang.UZ to "OK TV tarmoq tezligi testi", AppLang.EN to "OK TV Speed Test", AppLang.UK to "Тест швидкості мережі OK TV", AppLang.TR to "OK TV Hız Testi"),
+        "speed_test_title" to mapOf(AppLang.RU to "Тест скорости сети Mirovoy TV", AppLang.UZ to "Mirovoy TV tarmoq tezligi testi", AppLang.EN to "Mirovoy TV Speed Test", AppLang.UK to "Тест швидкості мережі Mirovoy TV", AppLang.TR to "Mirovoy TV Hız Testi"),
         "ping" to mapOf(AppLang.RU to "Пинг", AppLang.UZ to "Ping", AppLang.EN to "Ping", AppLang.UK to "Пінг", AppLang.TR to "Ping"),
         "speed" to mapOf(AppLang.RU to "Скорость", AppLang.UZ to "Tezlik", AppLang.EN to "Speed", AppLang.UK to "Швидкість", AppLang.TR to "Hız"),
         "start_test" to mapOf(AppLang.RU to "НАЧАТЬ ТЕСТ", AppLang.UZ to "TESTNI BOSHLASH", AppLang.EN to "START TEST", AppLang.UK to "ПОЧАТИ ТЕСТ", AppLang.TR to "TESTİ BAŞLAT"),

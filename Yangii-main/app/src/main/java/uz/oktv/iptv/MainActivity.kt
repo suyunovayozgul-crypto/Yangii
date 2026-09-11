@@ -1,7 +1,9 @@
 package uz.oktv.iptv
 
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
+import org.json.JSONObject
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
@@ -18,6 +20,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.annotation.OptIn
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -59,6 +62,8 @@ import androidx.compose.ui.input.key.*
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -79,16 +84,13 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.hls.DefaultHlsExtractorFactory
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
-import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uz.oktv.iptv.ui.theme.OKTVPlayerTheme
-import java.io.BufferedInputStream
 import java.io.File
-import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -96,6 +98,8 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 enum class VodFocusZone { SEARCH, GENRE_BTN, YEARS, GRID }
+
+private const val MIROVOY_WEBSITE_URL = "https://mirovoytv.uz"
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -121,70 +125,186 @@ class MainActivity : ComponentActivity() {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MainAppController() {
-    val context = LocalContext.current
-    val prefs: SharedPreferences = remember { context.getSharedPreferences("OKTV_Prefs", Context.MODE_PRIVATE) }
-    var screenState by remember { mutableStateOf(AppScreenState.CHECKING) }
-    var currentToken by remember { mutableStateOf(prefs.getString("token", "") ?: "") }
 
-    var preloadedChannels by remember { mutableStateOf<List<M3UChannel>>(emptyList()) }
-    var preloadedCategories by remember { mutableStateOf<List<String>>(listOf("Все", "❤️ Избранное")) }
-    val preloadedEpg = remember { mutableStateMapOf<String, List<EpgProgram>>() }
+    val context = LocalContext.current
+    val store = remember { PersonalPlaylistStore(context) }
+
+    var playlists by remember {
+        mutableStateOf(store.load())
+    }
+
+    var loadedChannels by remember {
+        mutableStateOf<List<M3UChannel>>(emptyList())
+    }
+
+    var loadedCategories by remember {
+        mutableStateOf(listOf("Все", "❤️ Избранное"))
+    }
+
+    var loadedEpg by remember {
+        mutableStateOf<Map<String, List<EpgProgram>>>(emptyMap())
+    }
+
+    var opened by remember {
+        mutableStateOf(false)
+    }
+
+    var loadingSavedPlaylist by remember {
+        mutableStateOf(true)
+    }
+
+    var startupError by remember {
+        mutableStateOf<String?>(null)
+    }
 
     LaunchedEffect(Unit) {
-        if (currentToken.isNotEmpty()) {
-            screenState = AppScreenState.LOADING_SYSTEM
-        } else {
-            delay(200)
-            screenState = AppScreenState.AUTH
+
+        val active = store.getActive()
+
+        if (active == null) {
+            loadingSavedPlaylist = false
+            return@LaunchedEffect
+        }
+
+        withContext(Dispatchers.IO) {
+            try {
+                val result = PersonalPlaylistLoader.load(active.url)
+
+                if (result.channels.isEmpty()) {
+                    throw IllegalStateException(
+                        "В сохранённом плейлисте не найдено каналов"
+                    )
+                }
+
+                store.setActiveId(active.id)
+
+                withContext(Dispatchers.Main) {
+                    loadedChannels = result.channels
+                    loadedCategories = result.categories
+                    loadedEpg = emptyMap()
+                    opened = true
+                    loadingSavedPlaylist = false
+                }
+
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    startupError =
+                        e.message ?: "Не удалось загрузить плейлист"
+                    loadingSavedPlaylist = false
+                }
+            }
         }
     }
 
-    when (screenState) {
-        AppScreenState.CHECKING -> {
-            Box(
-                modifier = Modifier.fillMaxSize().background(Color(0xFF070B14)),
-                contentAlignment = Alignment.Center
+    if (loadingSavedPlaylist) {
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF070B14)),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                CircularProgressIndicator(color = Color(0xFF2563EB), modifier = Modifier.size(36.dp))
+                CircularProgressIndicator(
+                    color = Color(0xFF2563EB),
+                    modifier = Modifier.size(36.dp)
+                )
+
+                Spacer(Modifier.height(14.dp))
+
+                Text(
+                    text = "Загрузка плейлиста...",
+                    color = Color.White,
+                    fontSize = 13.sp
+                )
             }
         }
-        AppScreenState.AUTH -> {
-            AuthScreenView(
-                onAuthSuccess = { token ->
-                    prefs.edit().putString("token", token).apply()
-                    currentToken = token
-                    screenState = AppScreenState.LOADING_SYSTEM
-                }
-            )
-        }
-        AppScreenState.LOADING_SYSTEM -> {
-            SystemLoadingScreen(
-                userToken = currentToken,
-                onLoadingComplete = { channels, categories, epgMap ->
-                    preloadedChannels = channels
-                    preloadedCategories = categories
-                    preloadedEpg.clear()
-                    preloadedEpg.putAll(epgMap)
-                    screenState = AppScreenState.MAIN_PLAYER
+
+    } else if (!opened) {
+
+        PersonalPlaylistScreen(
+            store = store,
+            playlists = playlists,
+            onPlaylistsChanged = { updated ->
+                playlists = updated
+            },
+            onPlaylistLoaded = { playlist, result ->
+
+                store.setActiveId(playlist.id)
+
+                loadedChannels = result.channels
+                loadedCategories = result.categories
+                loadedEpg = emptyMap()
+
+                startupError = null
+                opened = true
+            }
+        )
+
+    } else {
+
+        StalkerNativeApp(
+            userToken = "",
+            initialChannels = loadedChannels,
+            initialCategories = loadedCategories,
+            initialEpgMap = loadedEpg,
+            onLogout = {
+
+                opened = false
+                loadedChannels = emptyList()
+                loadedCategories = listOf("Все", "❤️ Избранное")
+                loadedEpg = emptyMap()
+            }
+        )
+    }
+
+    startupError?.let { message ->
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.75f))
+                .clickable {
+                    startupError = null
                 },
-                onError = {
-                    prefs.edit().remove("token").apply()
-                    currentToken = ""
-                    screenState = AppScreenState.AUTH
-                }
-            )
-        }
-        AppScreenState.MAIN_PLAYER -> {
-            StalkerNativeApp(
-                userToken = currentToken,
-                initialChannels = preloadedChannels,
-                initialCategories = preloadedCategories,
-                initialEpgMap = preloadedEpg,
-                onLogout = {
-                    prefs.edit().remove("token").apply()
-                    currentToken = ""
-                }
-            )
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                modifier = Modifier
+                    .widthIn(max = 420.dp)
+                    .fillMaxWidth(0.9f)
+                    .background(
+                        Color(0xFF0D1322),
+                        RoundedCornerShape(12.dp)
+                    )
+                    .padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "Не удалось загрузить плейлист",
+                    color = Color(0xFFF59E0B),
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(Modifier.height(10.dp))
+
+                Text(
+                    text = message,
+                    color = Color(0xFFCBD5E1),
+                    fontSize = 12.sp
+                )
+
+                Spacer(Modifier.height(14.dp))
+
+                Text(
+                    text = "Нажмите, чтобы открыть список плейлистов",
+                    color = Color(0xFF38BDF8),
+                    fontSize = 11.sp
+                )
+            }
         }
     }
 }
@@ -200,6 +320,8 @@ fun SystemLoadingScreen(
     var playlistStatus by remember { mutableStateOf("Загрузка списка каналов...") }
     var playlistOk by remember { mutableStateOf<Boolean?>(null) }
     var overallProgress by remember { mutableFloatStateOf(0f) }
+
+    val context = LocalContext.current
 
     val animatedProgress by animateFloatAsState(
         targetValue = overallProgress,
@@ -220,9 +342,58 @@ fun SystemLoadingScreen(
                 conn.outputStream.use { it.write(postData.toByteArray()) }
 
                 if (conn.responseCode == 200) {
-                    tokenStatus = "Проверка токена: Успешно [OK]"
-                    tokenOk = true
-                    overallProgress = 0.5f
+                    val responseText = conn.inputStream
+                        .bufferedReader()
+                        .use { it.readText() }
+
+                    val json = JSONObject(responseText)
+
+                    if (json.optBoolean("success", false)) {
+
+                        val prefs = context.getSharedPreferences(
+                            "oktv_prefs",
+                            Context.MODE_PRIVATE
+                        )
+
+                        prefs.edit().apply {
+                            putString(
+                                "subscription_tariff",
+                                json.optString("tariff", "")
+                            )
+                            putString(
+                                "subscription_status",
+                                json.optString("status", "")
+                            )
+                            putString(
+                                "subscription_expires_at",
+                                json.optString("expires_at", "")
+                            )
+                            putInt(
+                                "subscription_screens",
+                                json.optInt("screens", 0)
+                            )
+                            putBoolean(
+                                "subscription_auto_renew",
+                                json.optBoolean("auto_renew", false)
+                            )
+                            putString(
+                                "subscription_server_name",
+                                json.optString("server_name", "")
+                            )
+                            apply()
+                        }
+
+                        tokenStatus = "Проверка токена: Успешно [OK]"
+                        tokenOk = true
+                        overallProgress = 0.5f
+
+                    } else {
+                        tokenStatus = "Ключ не найден или подписка истекла!"
+                        tokenOk = false
+                        delay(1200)
+                        withContext(Dispatchers.Main) { onError() }
+                        return@withContext
+                    }
                 } else {
                     tokenStatus = "Ключ не найден или подписка истекла!"
                     tokenOk = false
@@ -371,7 +542,7 @@ fun StalkerNativeApp(
     onLogout: () -> Unit
 ) {
     val context = LocalContext.current
-    val prefs: SharedPreferences = remember { context.getSharedPreferences("OKTV_Prefs", Context.MODE_PRIVATE) }
+    val prefs: SharedPreferences = remember { context.getSharedPreferences("oktv_prefs", Context.MODE_PRIVATE) }
     val coroutineScope = rememberCoroutineScope()
 
     fun getKinopoiskKey(): String = "d02ffd4f-0440-4426-9e07-9ee33c306f6d"
@@ -392,6 +563,7 @@ fun StalkerNativeApp(
     // Fullscreen-меню каналов
     var showFullscreenChannelMenu by remember { mutableStateOf(false) }
     var fullscreenFilmButtonFocused by remember { mutableStateOf(false) }
+    var fullscreenInfoRightStep by remember { mutableIntStateOf(0) }
     var fullscreenMenuMode by remember { mutableStateOf("CHANNELS") }
     var fullscreenCategoryIndex by remember { mutableIntStateOf(0) }
     var fullscreenChannelIndex by remember { mutableIntStateOf(0) }
@@ -449,6 +621,7 @@ fun StalkerNativeApp(
     var epgUpdateProgress by remember { mutableFloatStateOf(0f) }
 
     var showChannelActionDialog by remember { mutableStateOf<M3UChannel?>(null) }
+    var showChannelInfoModal by remember { mutableStateOf(false) }
     var showDetailMovieModal by remember { mutableStateOf(false) }
     var showArchiveDetailModal by remember { mutableStateOf(false) }
     var selectedArchiveProgram by remember { mutableStateOf<EpgProgram?>(null) }
@@ -461,7 +634,7 @@ fun StalkerNativeApp(
     var epgSelectedIndex by remember { mutableIntStateOf(0) }
 
     var mainEngineMode by remember { mutableStateOf(prefs.getString("main_engine", "EXO") ?: "EXO") }
-    var ffmpegAudioEnabled by remember { mutableStateOf(prefs.getBoolean("ffmpeg_audio", false)) }
+    var ffmpegAudioEnabled by remember { mutableStateOf(prefs.getBoolean("ffmpeg_audio", true)) }
     var amlogicFixEnabled by remember { mutableStateOf(prefs.getBoolean("amlogic_fix", true)) }
     var smoothUpscaleEnabled by remember { mutableStateOf(prefs.getBoolean("smooth_upscale", true)) }
     var bufferSeconds by remember { mutableStateOf(prefs.getInt("buffer_sec", 10)) }
@@ -505,7 +678,16 @@ fun StalkerNativeApp(
     val epgListState = rememberLazyListState()
     val sideMenuListState = rememberLazyListState()
 
-    val systemTimeMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    var systemTimeMs by remember {
+        mutableLongStateOf(System.currentTimeMillis())
+    }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            systemTimeMs = System.currentTimeMillis()
+            kotlinx.coroutines.delay(1000L)
+        }
+    }
 
     val activeChannels = if (contentMode == AppContentMode.TV) tvChannels else vodChannels
     val activeCategories = if (contentMode == AppContentMode.TV) tvCategories else vodCategories
@@ -540,33 +722,17 @@ fun StalkerNativeApp(
     }
 
     val selectedCategory = activeCategories.getOrElse(selectedCategoryIndex) { Strings.get("all", currentLang) }
-    val filteredChannels = remember(selectedCategory, activeChannels, favorites, contentMode, currentLang, vodSearchQuery, selectedVodGenre, selectedVodYear) {
+    val filteredChannels = rememberFilteredChannels(
+        selectedCategory = selectedCategory,
+        activeChannels = activeChannels,
+        favorites = favorites,
+        contentMode = contentMode,
+        currentLang = currentLang,
+        vodSearchQuery = vodSearchQuery,
+        selectedVodGenre = selectedVodGenre,
+        selectedVodYear = selectedVodYear
+    )
 
-
-        val allLabel = Strings.get("all", currentLang)
-        if (contentMode == AppContentMode.VOD) {
-            var list = activeChannels
-            if (!selectedVodGenre.equals("Все", ignoreCase = true) && !selectedVodGenre.equals("Все жанры", ignoreCase = true)) {
-                list = list.filter { it.group.trim().equals(selectedVodGenre.trim(), ignoreCase = true) }
-            }
-            if (!selectedVodYear.equals("Все", ignoreCase = true)) {
-                list = list.filter { it.name.contains(selectedVodYear, ignoreCase = true) }
-            }
-            if (vodSearchQuery.length >= 2) {
-                val q = cleanTitleForSearch(vodSearchQuery)
-                list = list.filter { cleanTitleForSearch(it.name).contains(q, ignoreCase = true) }
-            }
-            list
-        } else {
-            when {
-                selectedCategory.equals(allLabel, ignoreCase = true) || selectedCategory.equals("Все", ignoreCase = true) -> activeChannels
-                selectedCategory.contains("Избранное", ignoreCase = true) || selectedCategory.contains("Favorites", ignoreCase = true) -> {
-                    activeChannels.filter { favorites.contains(it.id) }.sortedBy { favorites.indexOf(it.id) }
-                }
-                else -> activeChannels.filter { it.group.trim().equals(selectedCategory.trim(), ignoreCase = true) }
-            }
-        }
-    }
     // AUTO_PLAYER_LIST_SCROLL
     LaunchedEffect(focusedChannelIndex) {
         if (
@@ -592,6 +758,7 @@ fun StalkerNativeApp(
     androidx.activity.compose.BackHandler {
         when {
             showVodGenreModal -> { showVodGenreModal = false }
+            showChannelInfoModal -> { showChannelInfoModal = false }
             showDetailMovieModal -> { showDetailMovieModal = false }
             showArchiveDetailModal -> { showArchiveDetailModal = false }
             showChannelActionDialog != null -> { showChannelActionDialog = null }
@@ -606,6 +773,7 @@ fun StalkerNativeApp(
             showCategoryDialog -> { showCategoryDialog = false }
             showSideMenu -> { showSideMenu = false }
             isFullScreen -> {
+                activeStreamUrl = null
                 isFullScreen = false
                 showInfoBar = false
             }
@@ -680,32 +848,16 @@ fun StalkerNativeApp(
 
         coroutineScope.launch(Dispatchers.IO) {
             try {
-                val cacheGzFile = File(context.cacheDir, "epg_cache.xml.gz")
-                val conn = URL("https://oktv.uz/epg.xml.gz").openConnection() as HttpURLConnection
-                conn.connectTimeout = 15000
-                conn.readTimeout = 30000
-
-                if (conn.responseCode == 200) {
-                    val fileLength = conn.contentLength.toFloat()
-                    var downloaded = 0L
-                    BufferedInputStream(conn.inputStream, 262144).use { input ->
-                        FileOutputStream(cacheGzFile).use { output ->
-                            val buffer = ByteArray(32768)
-                            var bytesRead: Int
-                            while (input.read(buffer).also { bytesRead = it } != -1) {
-                                output.write(buffer, 0, bytesRead)
-                                downloaded += bytesRead
-                                if (fileLength > 0) {
-                                    val pct = (downloaded / fileLength * 0.4f).coerceIn(0f, 0.4f)
-                                    withContext(Dispatchers.Main) {
-                                        epgUpdateProgress = 0.1f + pct
-                                        epgUpdateStatus = "Скачивание: ${(pct * 250).toInt()}%"
-                                    }
-                                }
-                            }
+                val cacheGzFile = EpgRepository.downloadEpg(
+                    cacheDir = context.cacheDir,
+                    onProgress = { progress ->
+                        val pct = (progress * 0.4f).coerceIn(0f, 0.4f)
+                        coroutineScope.launch(Dispatchers.Main) {
+                            epgUpdateProgress = 0.1f + pct
+                            epgUpdateStatus = "Скачивание: ${(progress * 100f).toInt()}%"
                         }
                     }
-                }
+                )
 
                 withContext(Dispatchers.Main) {
                     epgUpdateStatus = "Парсинг телепрограммы (XML)..."
@@ -813,27 +965,58 @@ fun StalkerNativeApp(
         currentProgram?.title ?: ""
     }
 
-    val showFilmButton = contentMode == AppContentMode.VOD ||
-            isLikelyFilmOrCartoon(currentProgTitle) ||
-            Regex("(?i)\\b(х/ф|т/с|м/с|д/ф|м/ф|д/с|д-с|сериал|фильм|мультфильм|художественный|документальный)\\b").containsMatchIn(currentProgTitle) ||
-            (!currentProgTitle.isNullOrEmpty() && currentProgTitle.length > 3 &&
-                    !currentProgTitle.contains("Новости", true) &&
-                    !currentProgTitle.contains("Погода", true) &&
-                    !currentProgTitle.contains("Прямой эфир", true) &&
-                    !currentProgTitle.contains("Спорт", true) &&
-                    !currentProgTitle.contains("Пусть говорят", true))
+    val isFilmProgram =
+        Regex(
+            "(?i)^\\s*(т/с|х/ф|д/ф|д/с|с/ф|м/ф|м/с|т/ш)\\b"
+        ).containsMatchIn(currentProgTitle)
+
+    val showFilmButton =
+        contentMode == AppContentMode.VOD || isFilmProgram
+
+    val showProgramButton =
+        contentMode == AppContentMode.TV &&
+        !isArchivePlaying &&
+        !isFilmProgram
+
+    val openFilmOrProgram = {
+        if (showProgramButton) {
+            showEpgScheduleDialog = true
+        } else if (isArchivePlaying && playingArchiveProgram != null) {
+            selectedArchiveProgram = playingArchiveProgram
+            showArchiveDetailModal = true
+        } else {
+            showPlayButtonInModal = false
+            showDetailMovieModal = true
+        }
+    }
+
+    var epgInitialScrollDone by remember { mutableStateOf(false) }
 
     LaunchedEffect(showEpgScheduleDialog) {
         if (showEpgScheduleDialog && channelSchedule.isNotEmpty()) {
             val now = System.currentTimeMillis()
-            val curIdx = channelSchedule.indexOfFirst { it.startTimeMs <= now && (it.stopTimeMs == 0L || it.stopTimeMs > now) }
+            val curIdx = channelSchedule.indexOfFirst {
+                it.startTimeMs <= now &&
+                    (it.stopTimeMs == 0L || it.stopTimeMs > now)
+            }
+
             epgSelectedIndex = if (curIdx >= 0) curIdx else 0
+
+            // При открытии EPG сразу ставим список на текущую передачу.
+            epgInitialScrollDone = false
             epgListState.scrollToItem(epgSelectedIndex)
+            epgInitialScrollDone = true
+        } else {
+            epgInitialScrollDone = false
         }
     }
 
     LaunchedEffect(epgSelectedIndex) {
-        if (showEpgScheduleDialog && channelSchedule.isNotEmpty()) {
+        if (
+            showEpgScheduleDialog &&
+            channelSchedule.isNotEmpty() &&
+            epgInitialScrollDone
+        ) {
             epgListState.animateScrollToItem(epgSelectedIndex)
         }
     }
@@ -847,9 +1030,18 @@ fun StalkerNativeApp(
         }
     }
 
-    // --- ИСПОЛЬЗУЕМ ВЫНЕСЕННЫЙ РЕПОЗИТОРИЙ КИНОПОИСКА ---
-    LaunchedEffect(currentChannel?.id, currentProgram?.title, playingArchiveProgram?.title, showDetailMovieModal, contentMode, showFilmButton) {
-        if (showDetailMovieModal || showArchiveDetailModal || contentMode == AppContentMode.VOD || showFilmButton) {
+    // --- КИНОПОИСК: только VOD или EPG-программы с явным типом ---
+    LaunchedEffect(
+        currentChannel?.id,
+        currentProgram?.title,
+        playingArchiveProgram?.title,
+        contentMode,
+        showFilmButton
+    ) {
+        val shouldLoadKinopoisk =
+            contentMode == AppContentMode.VOD || showFilmButton
+
+        if (shouldLoadKinopoisk) {
             val targetTitle = if (isArchivePlaying) {
                 playingArchiveProgram?.title
             } else if (contentMode == AppContentMode.VOD) {
@@ -859,11 +1051,18 @@ fun StalkerNativeApp(
             }
 
             withContext(Dispatchers.IO) {
-                val result = fetchKinopoiskData(targetTitle ?: "", getKinopoiskKey())
+                val result = fetchKinopoiskData(
+                    targetTitle ?: "",
+                    getKinopoiskKey()
+                )
+
                 withContext(Dispatchers.Main) {
                     kpData = result
                 }
             }
+        } else {
+            // Обычная EPG-передача — данные Кинопоиска очищаем
+            kpData = KinopoiskData()
         }
     }
 
@@ -874,8 +1073,12 @@ fun StalkerNativeApp(
             amlogicFix = amlogicFixEnabled,
             bufferSeconds = bufferSeconds
         ).also { player ->
-            Log.e("OKTV_PLAYER_INSTANCE", "!!! EXOPLAYER CREATED !!! instance=${System.identityHashCode(player)}")
+            Log.e("Mirovoy TV_PLAYER_INSTANCE", "!!! EXOPLAYER CREATED !!! instance=${System.identityHashCode(player)}")
         }
+    }
+
+    val playerController = remember(exoPlayer) {
+        PlayerController(exoPlayer)
     }
 
     LaunchedEffect(isPlaying, activeStreamUrl) {
@@ -973,7 +1176,7 @@ fun StalkerNativeApp(
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                Log.e("OKTV_PLAYER_ERROR", "PLAYER ERROR: ${error.errorCodeName}", error)
+                Log.e("Mirovoy TV_PLAYER_ERROR", "PLAYER ERROR: ${error.errorCodeName}", error)
                 if (error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
                     exoPlayer.seekToDefaultPosition()
                     exoPlayer.prepare()
@@ -983,76 +1186,21 @@ fun StalkerNativeApp(
         }
         exoPlayer.addListener(listener)
         onDispose {
-            Log.e("OKTV_PLAYER_INSTANCE", "!!! EXOPLAYER RELEASED !!! instance=${System.identityHashCode(exoPlayer)}")
+            Log.e("Mirovoy TV_PLAYER_INSTANCE", "!!! EXOPLAYER RELEASED !!! instance=${System.identityHashCode(exoPlayer)}")
             exoPlayer.removeListener(listener)
             exoPlayer.release()
         }
     }
 
-    LaunchedEffect(activeStreamUrl, mainEngineMode, exoPlayer) {
+    LaunchedEffect(activeStreamUrl, mainEngineMode, playerController) {
         if (mainEngineMode == "EXO") {
             if (!activeStreamUrl.isNullOrEmpty()) {
-                val url = activeStreamUrl!!
-                val uri = Uri.parse(url)
-
-                exoPlayer.stop()
-                exoPlayer.clearMediaItems()
-
-                if (url.contains(".m3u8", ignoreCase = true)) {
-                    val tvDataSourceFactory = DefaultHttpDataSource.Factory()
-                        .setUserAgent("OKTV-Player/2.5")
-                        .setAllowCrossProtocolRedirects(true)
-                        .setConnectTimeoutMs(10000)
-                        .setReadTimeoutMs(10000)
-
-                    val hlsExtractorFactory = DefaultHlsExtractorFactory(
-                        DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES or
-                                DefaultTsPayloadReaderFactory.FLAG_DETECT_ACCESS_UNITS or
-                                DefaultTsPayloadReaderFactory.FLAG_ENABLE_HDMV_DTS_AUDIO_STREAMS,
-                        true
-                    )
-
-                    val hlsMediaSource = HlsMediaSource.Factory(tvDataSourceFactory)
-                        .setExtractorFactory(hlsExtractorFactory)
-                        .setAllowChunklessPreparation(false)
-                        .createMediaSource(
-                            MediaItem.Builder()
-                                .setUri(uri)
-                                .setLiveConfiguration(
-                                    androidx.media3.common.MediaItem.LiveConfiguration.Builder()
-                                        .setTargetOffsetMs(3000)
-                                        .setMaxOffsetMs(6000)
-                                        .setMinOffsetMs(1500)
-                                        .build()
-                                )
-                                .build()
-                        )
-
-                    exoPlayer.setMediaSource(hlsMediaSource)
-                } else {
-                    val vodDataSourceFactory = DefaultHttpDataSource.Factory()
-                        .setUserAgent("OKTV-Mobile-Player-Secret-2026")
-                        .setAllowCrossProtocolRedirects(true)
-                        .setConnectTimeoutMs(10000)
-                        .setReadTimeoutMs(10000)
-
-                    val mediaSource = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(vodDataSourceFactory)
-                        .createMediaSource(MediaItem.fromUri(uri))
-
-                    exoPlayer.setMediaSource(mediaSource)
-                }
-
-                exoPlayer.playbackParameters = androidx.media3.common.PlaybackParameters(1.0f)
-                exoPlayer.prepare()
-                exoPlayer.playWhenReady = true
-                exoPlayer.play()
+                playerController.play(activeStreamUrl!!)
             } else {
-                exoPlayer.stop()
-                exoPlayer.clearMediaItems()
+                playerController.stop()
             }
         } else {
-            exoPlayer.stop()
-            exoPlayer.clearMediaItems()
+            playerController.stop()
         }
     }
 
@@ -1133,7 +1281,7 @@ fun StalkerNativeApp(
                 if (keyEvent.type == KeyEventType.KeyDown) {
                     when (keyEvent.nativeKeyEvent.keyCode) {
                         KeyEvent.KEYCODE_DPAD_UP -> {
-                            if (showDetailMovieModal || showArchiveDetailModal || showVodGenreModal) {
+                            if (showDetailMovieModal || showArchiveDetailModal || showVodGenreModal || showChannelInfoModal) {
                                 if (showVodGenreModal) {
                                     if (genreSelectedIndex > 0) genreSelectedIndex--
                                 }
@@ -1204,7 +1352,7 @@ fun StalkerNativeApp(
                             true
                         }
                         KeyEvent.KEYCODE_DPAD_DOWN -> {
-                            if (showDetailMovieModal || showArchiveDetailModal || showVodGenreModal) {
+                            if (showDetailMovieModal || showArchiveDetailModal || showVodGenreModal || showChannelInfoModal) {
                                 if (showVodGenreModal) {
                                     if (genreSelectedIndex < availableGenres.size - 1) genreSelectedIndex++
                                 }
@@ -1272,7 +1420,7 @@ fun StalkerNativeApp(
                             true
                         }
                         KeyEvent.KEYCODE_DPAD_LEFT -> {
-                            if (showDetailMovieModal || showArchiveDetailModal || showVodGenreModal) return@onKeyEvent true
+                            if (showDetailMovieModal || showArchiveDetailModal || showVodGenreModal || showChannelInfoModal) return@onKeyEvent true
 
                             if (isFullScreen) {
                                 if (contentMode == AppContentMode.TV && !isArchivePlaying) {
@@ -1356,33 +1504,78 @@ fun StalkerNativeApp(
                             true
                         }
                         KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                            if (showDetailMovieModal || showArchiveDetailModal || showVodGenreModal) return@onKeyEvent true
+                            if (
+                                showDetailMovieModal ||
+                                showArchiveDetailModal ||
+                                showVodGenreModal ||
+                                showChannelInfoModal
+                            ) return@onKeyEvent true
 
                             if (isFullScreen) {
-                                if ((contentMode == AppContentMode.VOD || isArchivePlaying) && uiDuration > 0 && keyEvent.nativeKeyEvent.repeatCount > 0) {
+
+                                // VOD / ARCHIVE:
+                                // полностью сохраняем существующий seek
+                                if (
+                                    (contentMode == AppContentMode.VOD || isArchivePlaying) &&
+                                    uiDuration > 0 &&
+                                    keyEvent.nativeKeyEvent.repeatCount > 0
+                                ) {
                                     if (!isSeekingMode) {
                                         isSeekingMode = true
                                         seekTargetMs = uiPosition
                                         seekDeltaMs = 0L
                                     }
+
                                     seekDeltaMs += 15000L
-                                    seekTargetMs = (seekTargetMs + 15000L).coerceIn(0L, uiDuration)
+                                    seekTargetMs =
+                                        (seekTargetMs + 15000L).coerceIn(0L, uiDuration)
+
                                     showInfoBar = true
+
+                                // Обычный TV:
+                                // RIGHT #1 -> показать нижнюю панель
+                                // RIGHT #2 -> сфокусировать О КАНАЛЕ / О ФИЛЬМЕ
+                                } else if (
+                                    contentMode == AppContentMode.TV &&
+                                    !isArchivePlaying
+                                ) {
+                                    when (fullscreenInfoRightStep) {
+                                        0 -> {
+                                            showInfoBar = true
+                                            fullscreenFilmButtonFocused = false
+                                            fullscreenInfoRightStep = 1
+                                        }
+
+                                        else -> {
+                                            showInfoBar = true
+                                            fullscreenFilmButtonFocused =
+                                                showFilmButton || showProgramButton
+                                            fullscreenInfoRightStep = 2
+                                        }
+                                    }
+
                                 } else {
                                     showInfoBar = !showInfoBar
+                                    fullscreenFilmButtonFocused = false
+                                    fullscreenInfoRightStep = 0
                                 }
+
                             } else if (!showCategoryDialog && !showEpgScheduleDialog && !showSideMenu) {
                                 if (contentMode == AppContentMode.VOD) {
                                     when (vodFocusZone) {
                                         VodFocusZone.GRID -> {
-                                            if (focusedChannelIndex < filteredChannels.size - 1) focusedChannelIndex++
+                                            if (focusedChannelIndex < filteredChannels.size - 1) {
+                                                focusedChannelIndex++
+                                            }
                                         }
+
                                         VodFocusZone.YEARS -> {
                                             if (vodYearIndex < availableYears.size - 1) {
                                                 vodYearIndex++
                                                 selectedVodYear = availableYears[vodYearIndex]
                                             }
                                         }
+
                                         VodFocusZone.GENRE_BTN -> {}
                                         VodFocusZone.SEARCH -> {}
                                     }
@@ -1392,6 +1585,7 @@ fun StalkerNativeApp(
                             } else if (showSideMenu) {
                                 showSideMenu = false
                             }
+
                             true
                         }
                         KeyEvent.KEYCODE_MENU -> {
@@ -1571,26 +1765,32 @@ fun StalkerNativeApp(
 
                             } else if (
                                         showInfoBar &&
-                                        showFilmButton &&
+                                        (showFilmButton || showProgramButton) &&
                                         contentMode == AppContentMode.TV &&
                                         !isSeekingMode
                                     ) {
-                                        if (!fullscreenFilmButtonFocused) {
-                                            // Первый OK — только выбираем кнопку О фильме
-                                            fullscreenFilmButtonFocused = true
-                                        } else {
-                                            // Второй OK — открываем информацию
-                                            fullscreenFilmButtonFocused = false
+                            if (!fullscreenFilmButtonFocused) {
+                            // Запасной вариант: OK нажали раньше двух RIGHT
+                            fullscreenFilmButtonFocused = true
+                            fullscreenInfoRightStep = 2
+                        } else {
+                            // После двух RIGHT -> OK открывает нужную информацию
+                            fullscreenFilmButtonFocused = false
+                            fullscreenInfoRightStep = 0
 
-                                            if (isArchivePlaying && playingArchiveProgram != null) {
-                                                selectedArchiveProgram = playingArchiveProgram
-                                                showArchiveDetailModal = true
-                                            } else {
-                                                showPlayButtonInModal = false
-                                                showDetailMovieModal = true
-                                            }
-                                        }
-                                    } else if (isSeekingMode) {
+                            if (isArchivePlaying && playingArchiveProgram != null) {
+                                selectedArchiveProgram = playingArchiveProgram
+                                showArchiveDetailModal = true
+                            } else if (showFilmButton) {
+                                // Текущая передача является фильмом
+                                showPlayButtonInModal = false
+                                showDetailMovieModal = true
+                            } else if (showProgramButton) {
+                                // Обычная ТВ-передача -> информация о канале
+                                showChannelInfoModal = true
+                            }
+                        }
+                    } else if (isSeekingMode) {
                                         seekDeltaMs = 1L
                                     } else if (contentMode == AppContentMode.VOD || isArchivePlaying) {
                                         if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
@@ -1636,6 +1836,13 @@ fun StalkerNativeApp(
                             true
                         }
                         KeyEvent.KEYCODE_BACK -> {
+                            if (
+                                keyEvent.nativeKeyEvent.action != android.view.KeyEvent.ACTION_DOWN ||
+                                keyEvent.nativeKeyEvent.repeatCount > 0
+                            ) {
+                                return@onKeyEvent true
+                            }
+
                             when {
                                 showVodGenreModal -> { showVodGenreModal = false; true }
                                 showDetailMovieModal -> { showDetailMovieModal = false; true }
@@ -1697,25 +1904,10 @@ fun StalkerNativeApp(
                 contentAlignment = Alignment.BottomCenter
             ) {
                 if (mainEngineMode == "EXO") {
-                    AndroidView(
-                        factory = { ctx ->
-                            PlayerView(ctx).apply {
-                                player = exoPlayer
-                                useController = false
-                                resizeMode = currentAspectMode.resizeMode
-                                setBackgroundColor(android.graphics.Color.BLACK)
-                                setShutterBackgroundColor(android.graphics.Color.BLACK)
-                            }
-                        },
-                        update = { view ->
-                            if (view.player != exoPlayer) {
-                                view.player = exoPlayer
-                            }
-                            if (view.resizeMode != currentAspectMode.resizeMode) {
-                                view.resizeMode = currentAspectMode.resizeMode
-                            }
-                        },
-                        modifier = Modifier.fillMaxSize().background(Color.Black)
+                    ExoPlayerView(
+                        player = exoPlayer,
+                        resizeMode = currentAspectMode.resizeMode,
+                        modifier = Modifier.fillMaxSize()
                     )
                 } else {
                     AndroidView(
@@ -1938,7 +2130,7 @@ fun StalkerNativeApp(
                                             Text(text = "★ ${kpData.rating}", color = Color(0xFFFFD700), fontSize = 13.sp, fontWeight = FontWeight.Black)
                                         }
 
-                                        if (showFilmButton) {
+                                        if (showFilmButton || showProgramButton) {
                                             Box(
                                                 modifier = Modifier
                                                     .clip(RoundedCornerShape(6.dp))
@@ -1952,9 +2144,8 @@ fun StalkerNativeApp(
                                                         RoundedCornerShape(6.dp)
                                                     )
                                                     .clickable {
-                                                        if (isArchivePlaying && playingArchiveProgram != null) {
-                                                            selectedArchiveProgram = playingArchiveProgram
-                                                            showArchiveDetailModal = true
+                                                        if (showProgramButton) {
+                                                            showChannelInfoModal = true
                                                         } else {
                                                             showPlayButtonInModal = false
                                                             showDetailMovieModal = true
@@ -1962,7 +2153,12 @@ fun StalkerNativeApp(
                                                     }
                                                     .padding(horizontal = 10.dp, vertical = 3.dp)
                                             ) {
-                                                Text(text = "О фильме", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                                Text(
+                                                    text = if (showProgramButton) "О КАНАЛЕ" else "О ФИЛЬМЕ",
+                                                    color = Color.White,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
                                             }
                                         }
                                     }
@@ -2124,7 +2320,7 @@ fun StalkerNativeApp(
                 ) {
                     Column(
                         modifier = Modifier
-                            .width(280.dp)
+                            .then(if (androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT) Modifier.fillMaxWidth() else Modifier.width(280.dp))
                             .fillMaxHeight()
                             .background(Color(0xFF090D1A))
                             .border(0.5.dp, Color(0xFF1E293B))
@@ -2136,15 +2332,24 @@ fun StalkerNativeApp(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(text = "OK", color = Color(0xFF38BDF8), fontSize = 20.sp, fontWeight = FontWeight.Black)
-                                Text(text = "TV", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Black)
-                                Spacer(modifier = Modifier.width(4.dp))
+                                Image(
+                                    painter = painterResource(id = R.drawable.mirovoy_logo_full),
+                                    contentDescription = "Mirovoy TV",
+                                    modifier = Modifier.height(30.dp).widthIn(max = 150.dp),
+                                    contentScale = ContentScale.Fit
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
                                 Text(text = APP_VERSION_NAME, color = Color(0xFFF59E0B), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                             Text(text = "✕", color = Color.Gray, fontSize = 16.sp, modifier = Modifier.clickable { showSideMenu = false })
                         }
 
                         Spacer(modifier = Modifier.height(10.dp))
+
+                        val subscriptionTariff = prefs.getString("subscription_tariff", "").orEmpty()
+                        val subscriptionServer = prefs.getString("subscription_server_name", "").orEmpty()
+                        val subscriptionExpires = prefs.getString("subscription_expires_at", "").orEmpty()
+                        val subscriptionScreens = prefs.getInt("subscription_screens", 0)
 
                         Column(
                             modifier = Modifier
@@ -2153,19 +2358,19 @@ fun StalkerNativeApp(
                                 .denimDoubleBorder(8f, 6f)
                                 .padding(8.dp)
                         ) {
-                            Text(text = "ПОДПИСКА OKTV", color = Color(0xFF94A3B8), fontSize = 11.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                            Text(text = "ПОДПИСКА Mirovoy TV", color = Color(0xFF94A3B8), fontSize = 11.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                             Spacer(modifier = Modifier.height(6.dp))
 
                             Row(modifier = Modifier.fillMaxWidth()) {
-                                ProfileInfoBadge(title = "ТАРИФ", value = "VIP - (Без+18)", valueColor = Color(0xFFF59E0B), modifier = Modifier.weight(1f))
+                                ProfileInfoBadge(title = "ТАРИФ", value = subscriptionTariff.ifBlank { "—" }, valueColor = Color(0xFFF59E0B), modifier = Modifier.weight(1f))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                ProfileInfoBadge(title = "СЕРВЕР", value = "AUTO", valueColor = Color.White, modifier = Modifier.weight(1f))
+                                ProfileInfoBadge(title = "СЕРВЕР", value = subscriptionServer.ifBlank { "—" }, valueColor = Color.White, modifier = Modifier.weight(1f))
                             }
                             Spacer(modifier = Modifier.height(6.dp))
                             Row(modifier = Modifier.fillMaxWidth()) {
-                                ProfileInfoBadge(title = "ИСТЕКАЕТ", value = "18.09.2026", valueColor = Color(0xFFEF4444), modifier = Modifier.weight(1.2f))
+                                ProfileInfoBadge(title = "ИСТЕКАЕТ", value = subscriptionExpires.ifBlank { "—" }, valueColor = Color(0xFFEF4444), modifier = Modifier.weight(1.2f))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                ProfileInfoBadge(title = "ЭКРАНЫ", value = "2 ТВ", valueColor = Color(0xFF38BDF8), modifier = Modifier.weight(0.8f))
+                                ProfileInfoBadge(title = "ЭКРАНЫ", value = if (subscriptionScreens > 0) "$subscriptionScreens ТВ" else "—", valueColor = Color(0xFF38BDF8), modifier = Modifier.weight(0.8f))
                             }
                         }
 
@@ -2259,7 +2464,16 @@ fun StalkerNativeApp(
                                 }
                             }
                             item {
-                                SideNavButton(icon = "🔑", text = Strings.get("logout", currentLang), active = sideMenuIndex == 10) {
+                                SideNavButton(icon = "🌐", text = "mirovoytv.uz", active = sideMenuIndex == 10) {
+                                    sideMenuIndex = 10
+                                    showSideMenu = false
+                                    try {
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(MIROVOY_WEBSITE_URL)))
+                                    } catch (_: Exception) { }
+                                }
+                            }
+                            item {
+                                SideNavButton(icon = "🔑", text = Strings.get("logout", currentLang), active = sideMenuIndex == 11) {
                                     sideMenuIndex = 10
                                     showSideMenu = false
                                     showTokenResetDialog = true
@@ -2284,20 +2498,31 @@ fun StalkerNativeApp(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            val compactPhone = LocalConfiguration.current.screenWidthDp < 600
+
                             Text(
-                                text = "☰ ${Strings.get("menu", currentLang)}",
+                                text = if (compactPhone) "☰" else "☰ ${Strings.get("menu", currentLang)}",
                                 color = Color(0xFF38BDF8),
-                                fontSize = 13.sp,
+                                fontSize = if (compactPhone) 22.sp else 13.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
                                     .clickable { showSideMenu = true }
-                                    .padding(end = 12.dp)
+                                    .padding(
+                                        horizontal = if (compactPhone) 6.dp else 0.dp,
+                                        vertical = 4.dp
+                                    )
                             )
+
+                            Spacer(Modifier.width(10.dp))
+
                             Text(
                                 text = "${if (contentMode == AppContentMode.TV) "ТВ" else "Медиатека"} > $selectedCategory | [${if (mainEngineMode == "WEB") "Web HLS" else "Media3"}]",
                                 color = Color(0xFF94A3B8),
                                 fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                         Text(
@@ -2541,25 +2766,19 @@ fun StalkerNativeApp(
 
                                     Spacer(modifier = Modifier.width(12.dp))
 
-                                    if (showFilmButton) {
+                                    if (showFilmButton || showProgramButton) {
                                         Box(
                                             modifier = Modifier
                                                 .clip(RoundedCornerShape(8.dp))
                                                 .background(Brush.linearGradient(listOf(Color(0xFF2563EB), Color(0xFF38BDF8))))
                                                 .clickable {
-                                                    if (isArchivePlaying && playingArchiveProgram != null) {
-                                                        selectedArchiveProgram = playingArchiveProgram
-                                                        showArchiveDetailModal = true
-                                                    } else {
-                                                        showPlayButtonInModal = false
-                                                        showDetailMovieModal = true
-                                                    }
+                                                    openFilmOrProgram()
                                                 }
                                                 .padding(horizontal = 14.dp, vertical = 8.dp),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Text(
-                                                text = "О фильме",
+                                                text = if (showProgramButton) "Программа" else "О фильме",
                                                 color = Color.White,
                                                 fontSize = 12.sp,
                                                 fontWeight = FontWeight.Bold
@@ -2661,7 +2880,7 @@ fun StalkerNativeApp(
                                                 contentScale = ContentScale.Crop
                                             )
                                         } else {
-                                            Text(text = "OKTV\nMOVIE", color = Color(0xFF38BDF8), fontSize = 11.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                                            Text(text = "Mirovoy TV\nMOVIE", color = Color(0xFF38BDF8), fontSize = 11.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
                                         }
 
                                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopEnd) {
@@ -2711,16 +2930,16 @@ fun StalkerNativeApp(
                             }
                         }
                     } else {
-                        Row(
+                        uz.oktv.iptv.AdaptiveTwoPane(
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxWidth()
                         ) {
                             Column(
                                 modifier = Modifier
-                                    .weight(0.58f)
+                                    
                                     .fillMaxHeight()
-                                    .padding(end = 6.dp)
+                                    .padding(end = 6.dp, bottom = 6.dp)
                             ) {
                                 Box(
                                     modifier = Modifier
@@ -2738,25 +2957,10 @@ fun StalkerNativeApp(
                                 ) {
                                     if (filteredChannels.isNotEmpty()) {
                                         if (mainEngineMode == "EXO") {
-                                            AndroidView(
-                                                factory = { ctx ->
-                                                    PlayerView(ctx).apply {
-                                                        player = exoPlayer
-                                                        useController = false
-                                                        resizeMode = currentAspectMode.resizeMode
-                                                        setBackgroundColor(android.graphics.Color.BLACK)
-                                                        setShutterBackgroundColor(android.graphics.Color.BLACK)
-                                                    }
-                                                },
-                                                update = { view ->
-                                                    if (view.player != exoPlayer) {
-                                                        view.player = exoPlayer
-                                                    }
-                                                    if (view.resizeMode != currentAspectMode.resizeMode) {
-                                                        view.resizeMode = currentAspectMode.resizeMode
-                                                    }
-                                                },
-                                                modifier = Modifier.fillMaxSize().background(Color.Black)
+                                            ExoPlayerView(
+                                                player = exoPlayer,
+                                                resizeMode = currentAspectMode.resizeMode,
+                                                modifier = Modifier.fillMaxSize()
                                             )
                                         } else {
                                             AndroidView(
@@ -2913,25 +3117,19 @@ fun StalkerNativeApp(
 
                                         Spacer(modifier = Modifier.width(12.dp))
 
-                                        (if (showFilmButton) {
+                                        (if (showFilmButton || showProgramButton) {
                                             Box(
                                                 modifier = Modifier
                                                     .clip(RoundedCornerShape(8.dp))
                                                     .background(Brush.linearGradient(listOf(Color(0xFF2563EB), Color(0xFF38BDF8))))
                                                     .clickable {
-                                                        if (isArchivePlaying && playingArchiveProgram != null) {
-                                                            selectedArchiveProgram = playingArchiveProgram
-                                                            showArchiveDetailModal = true
-                                                        } else {
-                                                            showPlayButtonInModal = false
-                                                            showDetailMovieModal = true
-                                                        }
+                                                        openFilmOrProgram()
                                                     }
                                                     .padding(horizontal = 14.dp, vertical = 8.dp),
                                                 contentAlignment = Alignment.Center
                                             ) {
                                                 Text(
-                                                    text = "О фильме",
+                                                    text = if (showProgramButton) "Программа" else "О фильме",
                                                     color = Color.White,
                                                     fontSize = 12.sp,
                                                     fontWeight = FontWeight.Bold
@@ -2944,7 +3142,7 @@ fun StalkerNativeApp(
 
                             Column(
                                 modifier = Modifier
-                                    .weight(0.42f)
+                                    
                                     .fillMaxHeight()
                                     .background(Color(0xFF0D1322), RoundedCornerShape(8.dp))
                                     .denimDoubleBorder(8f, 6f)
@@ -3182,6 +3380,13 @@ fun StalkerNativeApp(
                     (context as? ComponentActivity)?.finish()
                 },
                 onDismiss = { showExitConfirmDialog = false }
+            )
+        }
+
+        if (showChannelInfoModal) {
+            ChannelInfoModal(
+                channel = currentChannel,
+                onDismiss = { showChannelInfoModal = false }
             )
         }
 
@@ -3542,11 +3747,32 @@ fun StalkerNativeApp(
                     Text(text = "🎧 ${Strings.get("support", currentLang)}", color = Color(0xFF38BDF8), fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(14.dp))
 
-                    ContactBadge(icon = "📞", title = "Телефон поддержки", value = "+998 90 142 50 00")
+                    ContactBadge(
+                        icon = "✈️",
+                        title = "Telegram kanalimiz",
+                        value = "t.me/mirovoytvuz",
+                        onClick = {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/mirovoytvuz")))
+                        }
+                    )
                     Spacer(modifier = Modifier.height(8.dp))
-                    ContactBadge(icon = "✈️", title = "Telegram канал", value = "t.me/Uz_sata")
+                    ContactBadge(
+                        icon = "👤",
+                        title = "Aloqa uchun admin",
+                        value = "@abdulloh_abdulhamid7",
+                        onClick = {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/abdulloh_abdulhamid7")))
+                        }
+                    )
                     Spacer(modifier = Modifier.height(8.dp))
-                    ContactBadge(icon = "🌐", title = "Официальный сайт", value = "oktv.uz")
+                    ContactBadge(
+                        icon = "🌐",
+                        title = "Rasmiy sayt",
+                        value = "mirovoytv.uz",
+                        onClick = {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(MIROVOY_WEBSITE_URL)))
+                        }
+                    )
 
                     Spacer(modifier = Modifier.height(16.dp))
 
@@ -3683,5 +3909,92 @@ fun StalkerNativeApp(
 
 
 
+}
+
+
+@Composable
+private fun ChannelInfoModal(
+    channel: M3UChannel?,
+    onDismiss: () -> Unit
+) {
+    if (channel == null) {
+        onDismiss()
+        return
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.55f))
+            .clickable { onDismiss() },
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier
+                .widthIn(min = 280.dp, max = 520.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color(0xFF111827))
+                .padding(20.dp)
+                .clickable { },
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = "О КАНАЛЕ",
+                color = Color.White,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Text(
+                text = channel.name,
+                color = Color.White,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (channel.group.isNotBlank()) {
+                Text(
+                    text = "Категория: ${channel.group}",
+                    color = Color.LightGray,
+                    fontSize = 14.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            if (channel.tvgId.isNotBlank()) {
+                Text(
+                    text = "TVG ID: ${channel.tvgId}",
+                    color = Color.Gray,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFF2563EB))
+                    .clickable { onDismiss() }
+                    .padding(horizontal = 18.dp, vertical = 8.dp)
+            ) {
+                Text(
+                    text = "✕ Закрыть",
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
 }
 

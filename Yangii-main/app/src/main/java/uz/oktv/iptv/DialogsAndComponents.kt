@@ -245,27 +245,31 @@ fun AuthScreenView(onAuthSuccess: (String) -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(text = "🛡️", fontSize = 11.sp)
                 Spacer(modifier = Modifier.width(4.dp))
-                Text(text = "OKTV Security System • $APP_VERSION_NAME", color = Color(0xFF64748B), fontSize = 11.sp)
+                Text(text = "Mirovoy TV Security System • $APP_VERSION_NAME", color = Color(0xFF64748B), fontSize = 11.sp)
             }
         }
     }
 }
 
 @Composable
-fun ContactBadge(icon: String, title: String, value: String) {
+fun ContactBadge(icon: String, title: String, value: String, onClick: (() -> Unit)? = null) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(Color(0xFF161F36), RoundedCornerShape(8.dp))
             .border(0.5.dp, Color(0xFF1E293B), RoundedCornerShape(8.dp))
+            .let { m -> if (onClick != null) m.clickable { onClick() } else m }
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(text = icon, fontSize = 16.sp)
         Spacer(modifier = Modifier.width(10.dp))
-        Column {
+        Column(modifier = Modifier.weight(1f)) {
             Text(text = title, color = Color(0xFF94A3B8), fontSize = 10.sp)
             Text(text = value, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        }
+        if (onClick != null) {
+            Text(text = "→", color = Color(0xFF38BDF8), fontSize = 16.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -493,8 +497,8 @@ fun SpeedTestModalDialog(lang: AppLang, onDismiss: () -> Unit) {
                     Text(text = "$pingMs ms", color = Color(0xFF10B981), fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(text = "Сервер OKTV", color = Color(0xFF94A3B8), fontSize = 11.sp)
-                    Text(text = "s1.oktv.uz", color = Color(0xFF38BDF8), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text(text = "Сервер", color = Color(0xFF94A3B8), fontSize = 11.sp)
+                    Text(text = "mirovoytv.uz", color = Color(0xFF38BDF8), fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 }
             }
 

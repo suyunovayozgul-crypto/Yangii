@@ -1,8 +1,6 @@
 package uz.oktv.iptv
 
 import android.content.Context
-import org.json.JSONArray
-import org.json.JSONObject
 
 data class PersonalPlaylist(
     val id: Long,
@@ -13,6 +11,18 @@ data class PersonalPlaylist(
     val enabled: Boolean = true
 )
 
+/**
+ * Ilova ichiga qattiq o'rnatilgan (hardcoded) plейlistlar — foydalanuvchi
+ * bularni ko'ra olmaydi, tahrirlay olmaydi va o'zi qo'lda havola qo'sha
+ * olmaydi. Faqat shular orasidan birini TANLASH imkoni beriladi
+ * (PersonalPlaylistScreen orqali).
+ */
+private val BUILTIN_PLAYLISTS = listOf(
+    PersonalPlaylist(id = 9001L, name = "Mirovoy TV — Asosiy", url = "https://mirovoytv.uz/playlists/c042aeff.m3u8"),
+    PersonalPlaylist(id = 9002L, name = "Mirovoy TV — Qo'shimcha", url = "https://mirovoytv.uz/playlists/b62e592a.m3u"),
+    PersonalPlaylist(id = 9003L, name = "Mirovoy TV — Zaxira", url = "https://mirovoytv.uz/playlists/813bc163.m3u")
+)
+
 class PersonalPlaylistStore(context: Context) {
 
     private val prefs =
@@ -21,51 +31,22 @@ class PersonalPlaylistStore(context: Context) {
     private val keyPlaylists = "playlists"
     private val keyActiveId = "active_playlist_id"
 
+    /**
+     * Foydalanuvchi hech qachon o'zi playlist qo'sha olmaydi — shuning uchun
+     * bu funksiya har doim faqat qattiq o'rnatilgan 3 ta playlistni qaytaradi.
+     * Eski versiyalarda saqlanib qolgan (agar bo'lsa) qo'lda kiritilgan
+     * yozuvlar butunlay e'tiborga olinmaydi.
+     */
     fun load(): List<PersonalPlaylist> {
-        val raw = prefs.getString(keyPlaylists, null) ?: return emptyList()
-
-        return try {
-            val array = JSONArray(raw)
-            val result = mutableListOf<PersonalPlaylist>()
-
-            for (i in 0 until array.length()) {
-                val o = array.getJSONObject(i)
-
-                result += PersonalPlaylist(
-                    id = o.optLong("id"),
-                    name = o.optString("name"),
-                    url = o.optString("url"),
-                    epgUrl = o.optString("epgUrl"),
-                    epgEnabled = o.optBoolean("epgEnabled", false),
-                    enabled = o.optBoolean("enabled", true)
-                )
-            }
-
-            result
-        } catch (_: Exception) {
-            emptyList()
+        if (getActiveId() == null) {
+            setActiveId(BUILTIN_PLAYLISTS.first().id)
         }
+        return BUILTIN_PLAYLISTS
     }
 
     fun save(list: List<PersonalPlaylist>) {
-        val array = JSONArray()
-
-        list.forEach { item ->
-            array.put(
-                JSONObject().apply {
-                    put("id", item.id)
-                    put("name", item.name)
-                    put("url", item.url)
-                    put("epgUrl", item.epgUrl)
-                    put("epgEnabled", item.epgEnabled)
-                    put("enabled", item.enabled)
-                }
-            )
-        }
-
-        prefs.edit()
-            .putString(keyPlaylists, array.toString())
-            .apply()
+        // Qasddan bo'sh — foydalanuvchi tomonidan ro'yxat qayta yozilishining
+        // oldini olish uchun. Playlistlar faqat BUILTIN_PLAYLISTS orqali beriladi.
     }
 
     fun add(
@@ -144,3 +125,4 @@ class PersonalPlaylistStore(context: Context) {
             ?: list.firstOrNull { it.enabled }
     }
 }
+

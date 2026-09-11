@@ -44,7 +44,7 @@ class PlayerController(
 
             val dataSourceFactory =
                 DefaultHttpDataSource.Factory()
-                    .setUserAgent("OKTV-Player/2.5")
+                    .setUserAgent("MirovoyTV-Player/2.5")
                     .setAllowCrossProtocolRedirects(true)
                     .setConnectTimeoutMs(10000)
                     .setReadTimeoutMs(10000)
@@ -80,7 +80,7 @@ class PlayerController(
 
             val dataSourceFactory =
                 DefaultHttpDataSource.Factory()
-                    .setUserAgent("OKTV-Mobile-Player-Secret-2026")
+                    .setUserAgent("MirovoyTV-Mobile-Player-2026")
                     .setAllowCrossProtocolRedirects(true)
                     .setConnectTimeoutMs(10000)
                     .setReadTimeoutMs(10000)
