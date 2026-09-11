@@ -1,0 +1,37 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kodni olish
+        uses: actions/checkout@v4
+
+      - name: JDK 25 o'rnatish
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '25'
+
+      - name: Android SDK o'rnatish
+        uses: android-actions/setup-android@v3
+
+      - name: Kerakli SDK platformasini o'rnatish (compileSdk 36)
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Gradle ishga tushirish huquqi
+        run: chmod +x gradlew
+
+      - name: Debug APK yasash
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: APK'ni saqlash (Actions natijasida yuklab olish uchun)
+        uses: actions/upload-artifact@v4
+        with:
+          name: MirovoyTV-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
