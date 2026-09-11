@@ -37,6 +37,9 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
+import androidx.media3.extractor.DefaultExtractorsFactory
+import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -54,6 +57,23 @@ class PlayerActivity : AppCompatActivity() {
 
     private var player: ExoPlayer? = null
     private lateinit var trackSelector: DefaultTrackSelector
+
+    // Ko'p bepul/pirat IPTV qayta-translyatsiyalarida MPEG-TS paketlari
+    // "standart" emas: kadrlar to'liq IDR bo'lmasligi, access unit'lar
+    // notekis kelishi yoki DTS audio ishlatilishi mumkin. ExoPlayer'ning
+    // standart (qattiq) TS o'qish sozlamasi bunday paketlarni rad etib,
+    // oqimni umuman ochmaydi yoki cheksiz "yuklanmoqda"da qoldiradi — aynan
+    // shu sabab ba'zi kanallar boshqa pleyerlarda (masalan VLC-asosli
+    // ilovalarda) ochilib, bizda ochilmasligi mumkin edi. Quyidagi "yumshoq"
+    // (tolerant) bayroqlar ExoPlayer'ga bunday paketlarni ham qabul qilishga
+    // ruxsat beradi. Har bir kanal ochilishida qayta yaratilmasligi uchun
+    // sinf darajasida bitta marta tayyorlab qo'yiladi.
+    private val tsExtractorsFactory = DefaultExtractorsFactory()
+        .setTsExtractorFlags(
+            DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES or
+                DefaultTsPayloadReaderFactory.FLAG_DETECT_ACCESS_UNITS or
+                DefaultTsPayloadReaderFactory.FLAG_ENABLE_HDMV_DTS_AUDIO_STREAMS
+        )
     private val executor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -141,6 +161,9 @@ class PlayerActivity : AppCompatActivity() {
     private lateinit var streamErrorView: TextView
     private lateinit var retryBtn: Button
     private lateinit var mpvSurfaceView: SurfaceView
+    private lateinit var webFallbackView: android.webkit.WebView
+    private var webFallbackPlayer: WebFallbackPlayer? = null
+    private var webFallbackActive: Boolean = false
     // Faqat ExoPlayer BARCHA urinishlaridan (referer variantlari + soft + hard
     // recover) keyin ham ochib bo'lmagan kanalda, oxirgi chora sifatida
     // yaratiladi (lazy) — chunki libVLC'ni ishga tushirish o'zi biroz og'ir,
@@ -249,6 +272,7 @@ class PlayerActivity : AppCompatActivity() {
         streamErrorView = findViewById(R.id.playerStreamError)
         retryBtn = findViewById(R.id.playerRetryBtn)
         mpvSurfaceView = findViewById(R.id.mpvSurfaceView)
+        webFallbackView = findViewById(R.id.webFallbackView)
         retryBtn.stateListAnimator = null
         resizeLabel = findViewById(R.id.playerResizeLabel)
         categoryRail = findViewById(R.id.categoryRail)
@@ -343,8 +367,13 @@ class PlayerActivity : AppCompatActivity() {
                     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
             )
 
-        val mediaSourceFactory = DefaultMediaSourceFactory(this)
+        val mediaSourceFactory = DefaultMediaSourceFactory(this, tsExtractorsFactory)
             .setDataSourceFactory(httpDataSourceFactory)
+            // Segment/manifest yuklashda vaqtinchalik xato bo'lsa (masalan bitta
+            // TS segment 502/504 qaytarsa), butun kanalni "o'lik" deb e'lon qilishdan
+            // oldin 3 marta qayta urinib ko'radi — jonli oqimlarda bunday qisqa
+            // uzilishlar odatiy hol.
+            .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(3))
 
         // NextRenderersFactory = DefaultRenderersFactory + FFmpeg software decoders.
         // Ko'p bepul IPTV kanallari AC-3/E-AC-3 audio bilan keladi; standart
@@ -374,7 +403,20 @@ class PlayerActivity : AppCompatActivity() {
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
-        trackSelector = DefaultTrackSelector(this)
+        // "Exceed if necessary" — qurilma/renderer rasmiy talablarga (masalan
+        // aniq profil/daraja) to'liq mos kelmasa ham, pleyer darrov voz
+        // kechmasdan baribir ijro etishga urinadi. Ko'p arzon IPTV kodlagichlari
+        // "noto'g'ri" profil belgilaydi, garchi video haqiqatda ochiladigan
+        // bo'lsa ham — shu bayroqlarsiz ExoPlayer bunday kanalni jimgina
+        // o'tkazib yuboradi (audio yoki video ko'rinmaydi).
+        trackSelector = DefaultTrackSelector(this).apply {
+            setParameters(
+                buildUponParameters()
+                    .setExceedAudioConstraintsIfNecessary(true)
+                    .setExceedVideoConstraintsIfNecessary(true)
+                    .setExceedRendererCapabilitiesIfNecessary(true)
+            )
+        }
 
         val exoPlayer = ExoPlayer.Builder(this, renderersFactory)
             .setMediaSourceFactory(mediaSourceFactory)
@@ -561,12 +603,51 @@ class PlayerActivity : AppCompatActivity() {
             onFailed = { reason ->
                 Log.e("PlayerError", "${channel.name}: VLC ham ocholmadi — $reason")
                 mpvSurfaceView.visibility = View.GONE
-                playerView.visibility = View.VISIBLE
-                showStreamError(channel.name)
+                if (!webFallbackActive) {
+                    tryWebFallback(channel)
+                } else {
+                    playerView.visibility = View.VISIBLE
+                    showStreamError(channel.name)
+                }
             }
         ).also { vlcFallbackPlayer = it }
 
         fallback.play(channel.url, userAgent, referer)
+    }
+
+    /**
+     * MUTLAQ OXIRGI chora: ExoPlayer ham, VLC ham ochib bo'lolmagan kanal —
+     * Chromium'ning o'zi (WebView + hls.js) orqali sinaydi. Ba'zi serverlar
+     * aynan brauzerga o'xshab so'ragan so'rovlarnigina qabul qiladi.
+     */
+    private fun tryWebFallback(channel: Channel) {
+        webFallbackActive = true
+        statusHint(getString(R.string.stream_reconnecting))
+        playerView.visibility = View.INVISIBLE
+        webFallbackView.visibility = View.VISIBLE
+
+        val userAgent = channel.userAgent.ifBlank { M3UParser.BROWSER_USER_AGENT }
+        val fallback = webFallbackPlayer ?: WebFallbackPlayer(
+            webView = webFallbackView,
+            onReady = { hideStreamError() },
+            onFailed = { reason ->
+                Log.e("PlayerError", "${channel.name}: Web HLS ham ocholmadi — $reason")
+                webFallbackView.visibility = View.GONE
+                playerView.visibility = View.VISIBLE
+                showStreamError(channel.name)
+            }
+        ).also { webFallbackPlayer = it }
+
+        fallback.play(channel.url, userAgent)
+    }
+
+    /** Boshqa kanalga o'tishdan oldin faol Web HLS ijrosini to'xtatadi. */
+    private fun stopWebFallback() {
+        if (!webFallbackActive) return
+        webFallbackActive = false
+        webFallbackPlayer?.stop()
+        webFallbackView.visibility = View.GONE
+        playerView.visibility = View.VISIBLE
     }
 
     /** ExoPlayer'ga qaytishdan oldin (yangi kanal yoki qo'lda qayta urinishda)
@@ -597,7 +678,7 @@ class PlayerActivity : AppCompatActivity() {
     /** Foydalanuvchi "Qayta urinish" tugmasini bosganda chaqiriladi. */
     private fun hardRecover() {
         hideStreamError()
-        stopVlcFallback()
+        stopVlcFallback(); stopWebFallback()
         retryCount = 0
         hardRecoverAttempted = false
         player?.release()
@@ -683,7 +764,8 @@ class PlayerActivity : AppCompatActivity() {
                 }
             }
             httpFactory.setDefaultRequestProperties(headers)
-            val mediaSource = DefaultMediaSourceFactory(httpFactory)
+            val mediaSource = DefaultMediaSourceFactory(httpFactory, tsExtractorsFactory)
+                .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(3))
                 .createMediaSource(MediaItem.fromUri(channel.url))
 
             exoPlayer.stop()
@@ -943,7 +1025,7 @@ class PlayerActivity : AppCompatActivity() {
         retryCount = 0
         hardRecoverAttempted = false
         refererAttemptIndex = 0
-        stopVlcFallback()
+        stopVlcFallback(); stopWebFallback()
         hideStreamError()
         titleView.text = channel.name
         updateProgramLabel()
@@ -1284,6 +1366,9 @@ class PlayerActivity : AppCompatActivity() {
         vlcFallbackPlayer?.stop(destroy = true)
         vlcFallbackPlayer = null
         vlcActive = false
+        webFallbackPlayer?.stop()
+        webFallbackPlayer = null
+        webFallbackActive = false
     }
 
     override fun onDestroy() {

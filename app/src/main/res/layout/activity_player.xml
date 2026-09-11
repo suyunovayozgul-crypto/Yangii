@@ -36,6 +36,15 @@
             android:background="#000000"
             android:visibility="gone" />
 
+        <!-- ENG OXIRGI chora: ExoPlayer HAM, VLC HAM ochib bo'lolmagan kanal
+             uchun Chromium'ning o'zi (WebView + hls.js) sinaydi. -->
+        <WebView
+            android:id="@+id/webFallbackView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="#000000"
+            android:visibility="gone" />
+
         <!-- Bosilganda 4 soniyadan keyin o'zi yashirinadigan overlay guruhi -->
         <FrameLayout
             android:id="@+id/overlayGroup"
