@@ -1,7 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- MUHIM: bu fayl (standart/asosiy strings.xml) avval faqat 5 ta satrga ega
+     edi, values-ru/strings.xml esa 53 ta. AAPT'da har bir til papkasidagi
+     (values-ru va h.k.) satr, standart values/strings.xml'da HAM bo'lishi
+     shart — aks holda "removing resource ... without required default
+     value" ogohlantirishi bilan, o'sha satr boshqa (rus bo'lmagan) tillarda
+     butunlay bo'sh chiqib qoladi. Shu sabab qolgan 48 ta satr shu yerga
+     o'zbekcha tarjimasi bilan qo'shildi. -->
 <resources>
     <string name="app_name">Mirovoy TV</string>
+    <string name="loading">Yuklanmoqda…</string>
+    <string name="search_hint">Kanal qidirish…</string>
+    <string name="no_channels">Kanallar topilmadi.</string>
+    <string name="load_error">Xatolik: ro\'yxatni yuklab bo\'lmadi. Internetni tekshiring. (%1$s)</string>
+    <string name="stream_error">Oqim xatoligi: %1$s hozircha mavjud emas</string>
+    <string name="retry">Qayta urinish</string>
+    <string name="send_diagnostics">Diagnostikani yuborish</string>
+
+    <string name="category_all">HAMMASI</string>
+    <string name="category_other">BOSHQA</string>
+
     <string name="menu_open">Menyuni ochish</string>
     <string name="menu_close">Menyuni yopish</string>
-    <string name="mirovoy_telegram">@mirovoyiptv</string>
-    <string name="mirovoy_website">mirovoytv.uz</string>
+    <string name="menu_channels_title">Kanallar</string>
+    <string name="menu_all_channels">Barcha kanallar</string>
+    <string name="menu_telegram">Bizning Telegram kanalimiz</string>
+    <string name="menu_about">Ilova haqida</string>
+    <string name="menu_categories_title">KATEGORIYALAR</string>
+
+    <string name="about_title">Mirovoy TV haqida</string>
+    <string name="about_body">Mirovoy TV — jonli translyatsiyalarni bepul tomosha qilish uchun ilova.\n\nYangi kanallar va yangilanishlardan xabardor bo\'lish uchun Telegram kanalimizga obuna bo\'ling:\nt.me/mirovoytvuz</string>
+    <string name="about_ok">Yopish</string>
+
+    <string name="player_channels_button">Kanallar ro\'yxati</string>
+    <string name="player_back_button">Orqaga</string>
+    <string name="player_resize_button">Ekran o\'lchamini o\'zgartirish</string>
+    <string name="player_rotate_button">Ekranni aylantirish</string>
+    <string name="live_badge">JONLI</string>
+
+    <string name="resize_fit">O\'LCHAMGA MOS</string>
+    <string name="resize_zoom">KATTALASHTIRISH</string>
+    <string name="resize_fill">TO\'LDIRISH</string>
+
+    <string name="epg_now_prefix">Hozir: %1$s</string>
+    <string name="epg_next_prefix">Keyingi: %1$s</string>
+
+    <string name="player_audio_button">Audio til</string>
+    <string name="player_epg_button">Dastur jadvali</string>
+    <string name="audio_track_dialog_title">Audio tilni tanlang</string>
+    <string name="audio_track_auto">Avtomatik</string>
+    <string name="audio_track_unknown">Noma\'lum til</string>
+    <string name="audio_track_none">Bu kanal uchun audio yo\'laklar haqida ma\'lumot yo\'q.</string>
+    <string name="epg_dialog_title">Dastur jadvali — %1$s</string>
+    <string name="epg_no_data">Bu kanal uchun hozircha EPG ma\'lumoti yo\'q.</string>
+    <string name="epg_close">Yopish</string>
+    <string name="stream_reconnecting">Ulanish tiklanmoqda…</string>
+
+    <string name="menu_settings">Sozlamalar</string>
+    <string name="settings_title">Sozlamalar</string>
+    <string name="settings_language_title">Ilova tili</string>
+    <string name="settings_language_uz">O\'zbekcha</string>
+    <string name="settings_language_ru">Русский</string>
+    <string name="settings_other_title">Boshqa</string>
+    <string name="settings_telegram">Bizning Telegram kanalimiz</string>
+    <string name="settings_back">Orqaga</string>
+
+    <string name="player_play_button">Ijro etish</string>
+    <string name="player_pause_button">Pauza</string>
+    <string name="player_channel_up_button">Keyingi kanal</string>
+    <string name="player_channel_down_button">Oldingi kanal</string>
+    <string name="player_settings_button">Sozlamalar</string>
 </resources>

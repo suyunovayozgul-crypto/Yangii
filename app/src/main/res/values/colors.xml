@@ -7,4 +7,23 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <!-- Ilovaning o'zi (item_channel_card.xml, activity_player.xml va h.k.)
+         ishlatadigan, lekin bu faylda hech qachon e'lon qilinmagan ranglar —
+         shu sabab "resource ... not found" xatosi bilan build yiqilardi. -->
+    <color name="bg">#0D1117</color>
+    <color name="panel">#161B22</color>
+    <color name="panel2">#1C2128</color>
+    <color name="drawer_bg">#12161C</color>
+    <color name="text">#FFFFFF</color>
+    <color name="muted">#8B949E</color>
+    <color name="line">#30363D</color>
+    <color name="amber">#FFC107</color>
+    <color name="cyan">#22D3EE</color>
+    <color name="live">#FF3B30</color>
+    <color name="overlay_bar">#99000000</color>
+    <color name="glass_panel">#CC0D1117</color>
+    <color name="glass_card">#33FFFFFF</color>
+    <color name="glass_card_selected">#40FFC107</color>
+    <color name="glass_border">#22FFFFFF</color>
 </resources>
