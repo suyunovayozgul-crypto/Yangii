@@ -8,7 +8,7 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "uz.oktv.iptv"
+        applicationId = "uz.mirivoytv.iptv"
         minSdk = 24
         targetSdk = 35
         versionCode = 27
