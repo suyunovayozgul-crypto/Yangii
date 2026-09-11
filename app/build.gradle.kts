@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace = "uz.oktv.iptv"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "uz.oktv.iptv"

@@ -21,8 +21,8 @@ jobs:
       - name: Android SDK o'rnatish
         uses: android-actions/setup-android@v3
 
-      - name: Kerakli SDK platformasini o'rnatish (compileSdk 35)
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Kerakli SDK platformasini o'rnatish (compileSdk 36)
+        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
 
       - name: Gradle ishga tushirish huquqi
         run: chmod +x gradlew
