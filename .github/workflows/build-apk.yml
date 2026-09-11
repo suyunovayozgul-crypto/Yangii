@@ -12,31 +12,26 @@ jobs:
       - name: Kodni olish
         uses: actions/checkout@v4
 
-      - name: JDK 17 o'rnatish
+      - name: JDK 25 o'rnatish
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '25'
 
       - name: Android SDK o'rnatish
         uses: android-actions/setup-android@v3
 
-      - name: Kerakli SDK platformasini o'rnatish (compileSdk 36)
-        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+      - name: Kerakli SDK platformasini o'rnatish (compileSdk 35)
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Gradle o'rnatish va ishga tushirish
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
-
-      - name: Bog'liqliklarni yuklab olish (NextLib tekshiruvi uchun)
-        run: gradle :app:dependencies --configuration debugRuntimeClasspath || true
+      - name: Gradle ishga tushirish huquqi
+        run: chmod +x gradlew
 
       - name: Debug APK yasash
-        run: gradle assembleDebug --stacktrace
+        run: ./gradlew assembleDebug --stacktrace
 
       - name: APK'ni saqlash (Actions natijasida yuklab olish uchun)
         uses: actions/upload-artifact@v4
         with:
-          name: SignalIPTV-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: MirovoyTV-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
