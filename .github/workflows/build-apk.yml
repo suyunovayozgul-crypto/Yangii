@@ -1,3 +1,4 @@
+          path: app/build/outputs/apk/debug/*.apk
 name: Build APK
 
 on:
@@ -17,9 +18,6 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '25'
-
-      - name: Android SDK o'rnatish
-        uses: android-actions/setup-android@v3
 
       - name: Kerakli SDK platformasini o'rnatish (compileSdk 36)
         run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
