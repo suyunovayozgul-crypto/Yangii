@@ -35,7 +35,7 @@ object UpdateChecker {
     private const val TAG = "UpdateChecker"
 
     // TODO: replace with your actual GitHub "owner/repo", e.g. "ismoil123/Yangii"
-    private const val REPO = "OWNER/REPO"
+    private const val REPO = "suyunovayozgul-crypto/Yangii"
 
     private const val API_URL = "https://api.github.com/repos/$REPO/releases/latest"
 
