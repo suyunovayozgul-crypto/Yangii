@@ -6,6 +6,24 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!-- Self-update: AppUpdateInstaller hands the downloaded APK to the system
+         installer via ACTION_VIEW/ACTION_INSTALL_PACKAGE. Without this permission
+         the system silently refuses the install request; this only lets the app
+         START a normal system-owned install screen, it never installs anything
+         itself. The user still sees and confirms the standard Android
+         "install/update this app?" dialog every time - this permission does not
+         skip or hide it. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <queries>
+        <!-- Needed on API 30+ so the implicit ACTION_VIEW install intent can find
+             the system package installer (package-visibility rules hide it otherwise). -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="application/vnd.android.package-archive" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -32,6 +50,20 @@
             </intent-filter>
 
         </activity>
+
+        <!-- Self-update: exposes the downloaded APK (stored in the app's private
+             external-files "updates/" folder) to the system installer via a
+             content:// URI, since Android N+ blocks handing installers a raw
+             file:// path. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
 
     </application>
 

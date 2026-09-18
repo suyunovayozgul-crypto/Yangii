@@ -19,6 +19,9 @@ import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.annotation.OptIn
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -74,6 +77,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
@@ -125,6 +129,12 @@ class MainActivity : ComponentActivity() {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MainAppController() {
+
+    // Self-update: checks GitHub Releases once per launch and, if a newer
+    // build exists, shows the user a dialog -> download progress -> the
+    // standard system install screen. See update/UpdateChecker.kt to set
+    // your GitHub "owner/repo".
+    uz.oktv.iptv.update.UpdateCheckerHost()
 
     val context = LocalContext.current
     val store = remember { PersonalPlaylistStore(context) }
@@ -602,6 +612,7 @@ fun StalkerNativeApp(
 
     var isFullScreen by remember { mutableStateOf(false) }
     var showInfoBar by remember { mutableStateOf(false) }
+    var showSlowCodecWarning by remember { mutableStateOf(false) }
     var showSideMenu by remember { mutableStateOf(false) }
     var showCategoryDialog by remember { mutableStateOf(false) }
     var showEpgScheduleDialog by remember { mutableStateOf(false) }
@@ -610,6 +621,7 @@ fun StalkerNativeApp(
     var showSpeedTestDialog by remember { mutableStateOf(false) }
     var showSupportDialog by remember { mutableStateOf(false) }
     var showTokenResetDialog by remember { mutableStateOf(false) }
+    var tokenDialogFocusIndex by remember { mutableIntStateOf(0) }
     var showExitConfirmDialog by remember { mutableStateOf(false) }
 
     var showSearchDialog by remember { mutableStateOf(false) }
@@ -1081,6 +1093,25 @@ fun StalkerNativeApp(
         PlayerController(exoPlayer)
     }
 
+    // Uy tugmasi bosilib ilova orqa fonga o'tganda (yoki task-switcher,
+    // ekran o'chganda) — pleyerni TO'XTATAMIZ. Aks holda video/ovoz
+    // orqa fonda davom etib, telefon batareyasini va trafikni behuda
+    // sarflayveradi. ON_STOP — aynan shu holatlarda ishga tushadi
+    // (bildirishnomalar panelini pastga tortish yoki qisqa vaqtli
+    // dialoglar UCHUN ishlamaydi — faqat haqiqatan ilovadan chiqilganda).
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, exoPlayer) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                exoPlayer.pause()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
     LaunchedEffect(isPlaying, activeStreamUrl) {
         if (isPlaying) {
             while (true) {
@@ -1157,6 +1188,27 @@ fun StalkerNativeApp(
                     }
                 }
                 availableAudioTracks = trackList
+
+                // Eski/og'ir video kodeklar (masalan MPEG-2) ko'p TV
+                // qurilmalarida apparat darajasida dekodlanmaydi va
+                // dasturiy (software) dekodlashga majbur qiladi — bu
+                // ba'zan video sekin/lag bilan ketishiga olib keladi.
+                // Foydalanuvchini shu haqda ogohlantiramiz.
+                var detectedSlowCodec = false
+                for (group in tracks.groups) {
+                    if (group.type != C.TRACK_TYPE_VIDEO) continue
+                    for (tIdx in 0 until group.length) {
+                        if (!group.isTrackSelected(tIdx)) continue
+                        val mime = group.getTrackFormat(tIdx).sampleMimeType ?: continue
+                        if (mime == MimeTypes.VIDEO_MPEG2 ||
+                            mime == MimeTypes.VIDEO_MPEG ||
+                            mime == MimeTypes.VIDEO_H263
+                        ) {
+                            detectedSlowCodec = true
+                        }
+                    }
+                }
+                showSlowCodecWarning = detectedSlowCodec
             }
 
             override fun onVideoSizeChanged(videoSize: VideoSize) {
@@ -1201,6 +1253,13 @@ fun StalkerNativeApp(
             }
         } else {
             playerController.stop()
+        }
+    }
+
+    LaunchedEffect(showSlowCodecWarning) {
+        if (showSlowCodecWarning) {
+            delay(6000)
+            showSlowCodecWarning = false
         }
     }
 
@@ -1384,7 +1443,7 @@ fun StalkerNativeApp(
                             if (showCategoryDialog) {
                                 if (dialogCategoryIndex < activeCategories.size - 1) dialogCategoryIndex++
                             } else if (showSideMenu) {
-                                if (sideMenuIndex < 10) sideMenuIndex++
+                                if (sideMenuIndex < 11) sideMenuIndex++
                             } else if (showEpgScheduleDialog) {
                                 if (epgSelectedIndex < channelSchedule.size - 1) epgSelectedIndex++
                             } else if (contentMode == AppContentMode.VOD) {
@@ -1420,6 +1479,10 @@ fun StalkerNativeApp(
                             true
                         }
                         KeyEvent.KEYCODE_DPAD_LEFT -> {
+                            if (showTokenResetDialog) {
+                                tokenDialogFocusIndex = 0
+                                return@onKeyEvent true
+                            }
                             if (showDetailMovieModal || showArchiveDetailModal || showVodGenreModal || showChannelInfoModal) return@onKeyEvent true
 
                             if (isFullScreen) {
@@ -1504,6 +1567,10 @@ fun StalkerNativeApp(
                             true
                         }
                         KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                            if (showTokenResetDialog) {
+                                tokenDialogFocusIndex = 1
+                                return@onKeyEvent true
+                            }
                             if (
                                 showDetailMovieModal ||
                                 showArchiveDetailModal ||
@@ -1593,6 +1660,16 @@ fun StalkerNativeApp(
                             true
                         }
                         KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                            if (showTokenResetDialog) {
+                                if (tokenDialogFocusIndex == 1) {
+                                    showTokenResetDialog = false
+                                    onLogout()
+                                    Toast.makeText(context, "Выберите плейлист", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    showTokenResetDialog = false
+                                }
+                                return@onKeyEvent true
+                            }
                             if (showDetailMovieModal) {
                                 activeStreamUrl = filteredChannels.getOrNull(selectedChannelIndex)?.url ?: currentChannel?.url
                                 showDetailMovieModal = false
@@ -1694,7 +1771,14 @@ fun StalkerNativeApp(
                                     }
                                     10 -> {
                                         showSideMenu = false
+                                        try {
+                                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(MIROVOY_WEBSITE_URL)))
+                                        } catch (_: Exception) { }
+                                    }
+                                    11 -> {
+                                        showSideMenu = false
                                         showTokenResetDialog = true
+                                        tokenDialogFocusIndex = 0
                                     }
                                 }
                             } else if (showEpgScheduleDialog) {
@@ -1979,6 +2063,32 @@ fun StalkerNativeApp(
                             modifier = Modifier
                                 .background(Color(0x99000000), RoundedCornerShape(12.dp))
                                 .padding(horizontal = 32.dp, vertical = 20.dp)
+                        )
+                    }
+                }
+
+                AnimatedVisibility(
+                    visible = showSlowCodecWarning,
+                    enter = slideInVertically { -it } + fadeIn(),
+                    exit = slideOutVertically { -it } + fadeOut(),
+                    modifier = Modifier.align(Alignment.TopCenter)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .padding(top = 16.dp, start = 24.dp, end = 24.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xCC7A4A00))
+                            .border(0.5.dp, Color(0xFFFBBF24).copy(alpha = 0.7f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("⚠", fontSize = 16.sp)
+                        Text(
+                            Strings.get("slow_codec_warning", currentLang),
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
                 }
@@ -2474,9 +2584,10 @@ fun StalkerNativeApp(
                             }
                             item {
                                 SideNavButton(icon = "🔑", text = Strings.get("logout", currentLang), active = sideMenuIndex == 11) {
-                                    sideMenuIndex = 10
+                                    sideMenuIndex = 11
                                     showSideMenu = false
                                     showTokenResetDialog = true
+                                    tokenDialogFocusIndex = 0
                                 }
                             }
                             item { Spacer(modifier = Modifier.height(20.dp)) }
@@ -3728,6 +3839,10 @@ fun StalkerNativeApp(
         }
 
         if (showSupportDialog) {
+            var supportFocusIndex by remember { mutableIntStateOf(0) }
+            val supportFocusRequester = remember { FocusRequester() }
+            LaunchedEffect(Unit) { supportFocusRequester.requestFocus() }
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -3740,6 +3855,35 @@ fun StalkerNativeApp(
                         .width(360.dp)
                         .background(Color(0xFF0D1322), RoundedCornerShape(12.dp))
                         .denimDoubleBorder(12f, 10f)
+                        .focusRequester(supportFocusRequester)
+                        .focusable()
+                        .onKeyEvent { keyEvent ->
+                            if (keyEvent.type != androidx.compose.ui.input.key.KeyEventType.KeyDown) return@onKeyEvent false
+                            when (keyEvent.nativeKeyEvent.keyCode) {
+                                android.view.KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                    supportFocusIndex = (supportFocusIndex + 1).coerceAtMost(3)
+                                    true
+                                }
+                                android.view.KeyEvent.KEYCODE_DPAD_UP -> {
+                                    supportFocusIndex = (supportFocusIndex - 1).coerceAtLeast(0)
+                                    true
+                                }
+                                android.view.KeyEvent.KEYCODE_DPAD_CENTER, android.view.KeyEvent.KEYCODE_ENTER, android.view.KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                                    when (supportFocusIndex) {
+                                        0 -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/mirovoytvuz")))
+                                        1 -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/abdulloh_abdulhamid7")))
+                                        2 -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(MIROVOY_WEBSITE_URL)))
+                                        3 -> showSupportDialog = false
+                                    }
+                                    true
+                                }
+                                android.view.KeyEvent.KEYCODE_BACK -> {
+                                    showSupportDialog = false
+                                    true
+                                }
+                                else -> false
+                            }
+                        }
                         .padding(18.dp)
                         .clickable(enabled = false) {},
                     horizontalAlignment = Alignment.CenterHorizontally
@@ -3751,6 +3895,7 @@ fun StalkerNativeApp(
                         icon = "✈️",
                         title = "Telegram kanalimiz",
                         value = "t.me/mirovoytvuz",
+                        isFocused = supportFocusIndex == 0,
                         onClick = {
                             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/mirovoytvuz")))
                         }
@@ -3760,6 +3905,7 @@ fun StalkerNativeApp(
                         icon = "👤",
                         title = "Aloqa uchun admin",
                         value = "@abdulloh_abdulhamid7",
+                        isFocused = supportFocusIndex == 1,
                         onClick = {
                             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/abdulloh_abdulhamid7")))
                         }
@@ -3769,6 +3915,7 @@ fun StalkerNativeApp(
                         icon = "🌐",
                         title = "Rasmiy sayt",
                         value = "mirovoytv.uz",
+                        isFocused = supportFocusIndex == 2,
                         onClick = {
                             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(MIROVOY_WEBSITE_URL)))
                         }
@@ -3780,6 +3927,11 @@ fun StalkerNativeApp(
                         modifier = Modifier
                             .fillMaxWidth()
                             .background(Color(0xFF2563EB), RoundedCornerShape(8.dp))
+                            .border(
+                                width = if (supportFocusIndex == 3) 2.dp else 0.dp,
+                                color = Color.White,
+                                shape = RoundedCornerShape(8.dp)
+                            )
                             .clickable { showSupportDialog = false }
                             .padding(10.dp),
                         contentAlignment = Alignment.Center
@@ -3847,10 +3999,10 @@ fun StalkerNativeApp(
                         .clickable(enabled = false) {},
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text("СБРОСИТЬ ТОКЕН?", color = Color(0xFFEF4444), fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text("СМЕНИТЬ ПЛЕЙЛИСТ?", color = Color(0xFFEF4444), fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Вы действительно хотите выйти из аккаунта и ввести новый токен доступа?",
+                        text = "Вы будете возвращены к выбору плейлиста. Текущий канал остановится.",
                         color = Color(0xFF94A3B8),
                         fontSize = 11.sp,
                         textAlign = TextAlign.Center
@@ -3861,7 +4013,15 @@ fun StalkerNativeApp(
                             modifier = Modifier
                                 .weight(1f)
                                 .background(Color(0xFF1E293B), RoundedCornerShape(6.dp))
-                                .clickable { showTokenResetDialog = false }
+                                .border(
+                                    width = if (tokenDialogFocusIndex == 0) 2.dp else 0.dp,
+                                    color = Color(0xFF38BDF8),
+                                    shape = RoundedCornerShape(6.dp)
+                                )
+                                .clickable {
+                                    tokenDialogFocusIndex = 0
+                                    showTokenResetDialog = false
+                                }
                                 .padding(10.dp),
                             contentAlignment = Alignment.Center
                         ) {
@@ -3872,15 +4032,21 @@ fun StalkerNativeApp(
                             modifier = Modifier
                                 .weight(1f)
                                 .background(Color(0xFFEF4444), RoundedCornerShape(6.dp))
+                                .border(
+                                    width = if (tokenDialogFocusIndex == 1) 2.dp else 0.dp,
+                                    color = Color.White,
+                                    shape = RoundedCornerShape(6.dp)
+                                )
                                 .clickable {
+                                    tokenDialogFocusIndex = 1
                                     showTokenResetDialog = false
                                     onLogout()
-                                    Toast.makeText(context, "Токен сброшен!", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Выберите плейлист", Toast.LENGTH_SHORT).show()
                                 }
                                 .padding(10.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text("СБРОСИТЬ", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("СМЕНИТЬ", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }

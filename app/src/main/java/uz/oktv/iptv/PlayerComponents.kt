@@ -74,9 +74,16 @@ fun createRealExoPlayer(
     // path on phones and Smart TVs.
     val renderersFactory =
         NextRenderersFactory(context).apply {
-            // Audio fix is always enabled in the Mirovoy TV build.
+            // TV fix: use hardware decoders first, fall back to FFmpeg
+            // (software) only when the platform truly can't decode the
+            // stream (e.g. AC-3/DTS audio). PREFER forced software video
+            // decoding too, which weaker TV chips can't keep up with —
+            // that showed up as playback looking like it runs at ~0.5x.
             setExtensionRendererMode(
-                DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
+                if (ffmpegAudio)
+                    DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
+                else
+                    DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF
             )
             setEnableDecoderFallback(true)
         }
@@ -145,14 +152,30 @@ fun createRealExoPlayer(
     // ========================================================
     // BUFFER (АДАПТИРОВАНО ПОД КОРОТКОЕ ОКНО СЕРВЕРА ~14-22 СЕК)
     // ========================================================
+    // Ранее bufferSeconds и amlogicFix никак не влияли на реальный
+    // буфер (значения были жёстко прописаны). Теперь оба параметра
+    // реально используются: bufferSeconds задаёт базовый запас, а
+    // amlogicFix увеличивает максимальный буфер — это не ускоряет
+    // сам декодер (на слабом чипе software-декодирование останется
+    // медленным), но даёт плееру больше запаса перед кадрами и
+    // заметно снижает частоту рывков/пересборки буфера на слабых
+    // ТВ-приставках и медленных (MPEG-2) каналах.
+    val minBufferMs = (bufferSeconds.coerceIn(2, 30) * 1000)
+    val maxBufferMs = if (amlogicFix) {
+        (minBufferMs * 3).coerceAtLeast(18000)
+    } else {
+        (minBufferMs * 2).coerceAtLeast(8000)
+    }
+    val playbackStartBufferMs = (minBufferMs / 3).coerceAtLeast(800)
+    val playbackAfterRebufferMs = (minBufferMs / 2).coerceAtLeast(1200)
 
     val loadControl =
         DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                4000,   // Мин. буфер 4 сек
-                8000,   // Макс. буфер 8 сек (не дает упираться в потолок сервера)
-                1000,   // Старт через 1 сек
-                1500    // Быстрый выход из буферизации за 1.5 сек
+                minBufferMs,
+                maxBufferMs,
+                playbackStartBufferMs,
+                playbackAfterRebufferMs
             )
             .setBackBuffer(
                 0,
@@ -192,6 +215,16 @@ fun createRealExoPlayer(
             )
             .setLoadControl(
                 loadControl
+            )
+            // TV fix (0.5x speed on some SD/MPEG-2 channels): some Android TV
+            // boxes report a wrong/halved frame rate for interlaced MPEG-2
+            // streams. ExoPlayer's default behaviour tries to switch the TV's
+            // display refresh rate to match that (wrong) frame rate, which
+            // makes the whole picture play back at half speed. Turning this
+            // off keeps the display at its normal refresh rate regardless of
+            // what the stream reports.
+            .setVideoChangeFrameRateStrategy(
+                androidx.media3.common.C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF
             )
             .build()
             .apply {

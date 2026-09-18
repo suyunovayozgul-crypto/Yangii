@@ -252,12 +252,12 @@ fun AuthScreenView(onAuthSuccess: (String) -> Unit) {
 }
 
 @Composable
-fun ContactBadge(icon: String, title: String, value: String, onClick: (() -> Unit)? = null) {
+fun ContactBadge(icon: String, title: String, value: String, isFocused: Boolean = false, onClick: (() -> Unit)? = null) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(Color(0xFF161F36), RoundedCornerShape(8.dp))
-            .border(0.5.dp, Color(0xFF1E293B), RoundedCornerShape(8.dp))
+            .border(if (isFocused) 2.dp else 0.5.dp, if (isFocused) Color.White else Color(0xFF1E293B), RoundedCornerShape(8.dp))
             .let { m -> if (onClick != null) m.clickable { onClick() } else m }
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -311,7 +311,7 @@ fun SideNavButton(icon: String, text: String, active: Boolean = false, onClick: 
 }
 
 @Composable
-fun EngineSelectButton(title: String, subtitle: String, active: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+fun EngineSelectButton(title: String, subtitle: String, active: Boolean, isFocused: Boolean = false, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Column(
         modifier = modifier
             .background(
@@ -319,8 +319,8 @@ fun EngineSelectButton(title: String, subtitle: String, active: Boolean, modifie
                 RoundedCornerShape(10.dp)
             )
             .border(
-                width = 1.dp,
-                color = if (active) Color(0xFF38BDF8) else Color(0xFF1E293B),
+                width = if (isFocused) 3.dp else 1.dp,
+                color = if (isFocused) Color.White else if (active) Color(0xFF38BDF8) else Color(0xFF1E293B),
                 shape = RoundedCornerShape(10.dp)
             )
             .clickable { onClick() }
@@ -334,7 +334,7 @@ fun EngineSelectButton(title: String, subtitle: String, active: Boolean, modifie
 }
 
 @Composable
-fun RenderPillButton(text: String, active: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+fun RenderPillButton(text: String, active: Boolean, isFocused: Boolean = false, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Box(
         modifier = modifier
             .background(
@@ -342,8 +342,8 @@ fun RenderPillButton(text: String, active: Boolean, modifier: Modifier = Modifie
                 RoundedCornerShape(8.dp)
             )
             .border(
-                width = 1.dp,
-                color = if (active) Color(0xFF38BDF8) else Color(0xFF1E293B),
+                width = if (isFocused) 3.dp else 1.dp,
+                color = if (isFocused) Color.White else if (active) Color(0xFF38BDF8) else Color(0xFF1E293B),
                 shape = RoundedCornerShape(8.dp)
             )
             .clickable { onClick() }
@@ -360,11 +360,22 @@ fun RenderPillButton(text: String, active: Boolean, modifier: Modifier = Modifie
 }
 
 @Composable
-fun SwitchRow(title: String, desc: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+fun SwitchRow(title: String, desc: String, checked: Boolean, isFocused: Boolean = false, onCheckedChange: (Boolean) -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
+            .padding(vertical = 4.dp)
+            .background(
+                if (isFocused) Color(0xFF1E293B) else Color.Transparent,
+                RoundedCornerShape(8.dp)
+            )
+            .border(
+                width = if (isFocused) 2.dp else 0.dp,
+                color = Color.White,
+                shape = RoundedCornerShape(8.dp)
+            )
+            .clickable { onCheckedChange(!checked) }
+            .padding(6.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -379,7 +390,6 @@ fun SwitchRow(title: String, desc: String, checked: Boolean, onCheckedChange: (B
                     if (checked) Color(0xFF10B981) else Color(0xFF334155),
                     RoundedCornerShape(6.dp)
                 )
-                .clickable { onCheckedChange(!checked) }
                 .padding(horizontal = 14.dp, vertical = 6.dp)
         ) {
             Text(
@@ -394,7 +404,10 @@ fun SwitchRow(title: String, desc: String, checked: Boolean, onCheckedChange: (B
 
 @Composable
 fun SpeedTestModalDialog(lang: AppLang, onDismiss: () -> Unit) {
-    var isTesting by remember { mutableStateOf(false) }
+    // Pult markaziy (OK) tugmasi bu oynada ishlamasligi mumkin edi,
+    // shuning uchun test ochilishi bilan o'zi avtomatik boshlanadi —
+    // tugma bosish shart emas.
+    var isTesting by remember { mutableStateOf(true) }
     var pingMs by remember { mutableIntStateOf(14) }
     var speedMbps by remember { mutableFloatStateOf(0f) }
     val animatedSpeed by animateFloatAsState(
@@ -543,6 +556,16 @@ fun PlaybackSettingsDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    // Pult (D-pad) bilan navigatsiya: har bir qator (audio treklar,
+    // dvigatel, uchta svitch, bufer) ro'yxatdagi bitta "bo'lim" deb
+    // hisoblanadi. YUQORI/PASTKI bo'limlar orasida yuradi,
+    // CHAP/O'NG dvigatel va bufer qiymatlarini o'zgartiradi.
+    val sectionCount = availableAudioTracks.size + 5 // tracks + engine + 3 switch + buffer
+    var focusIndex by remember { mutableIntStateOf(0) }
+    val bufferOptions = listOf(2, 5, 10, 20)
+    val dialogFocusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) { dialogFocusRequester.requestFocus() }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -555,6 +578,61 @@ fun PlaybackSettingsDialog(
                 .width(500.dp)
                 .background(Color(0xFF0D1322), RoundedCornerShape(16.dp))
                 .denimDoubleBorder(16f, 14f)
+                .focusRequester(dialogFocusRequester)
+                .focusable()
+                .onKeyEvent { keyEvent ->
+                    if (keyEvent.type != KeyEventType.KeyDown) return@onKeyEvent false
+                    val engineIdx = availableAudioTracks.size
+                    val ffmpegIdx = engineIdx + 1
+                    val amlogicIdx = engineIdx + 2
+                    val upscaleIdx = engineIdx + 3
+                    val bufferIdx = engineIdx + 4
+                    when (keyEvent.nativeKeyEvent.keyCode) {
+                        android.view.KeyEvent.KEYCODE_DPAD_DOWN -> {
+                            focusIndex = (focusIndex + 1).coerceAtMost(sectionCount - 1)
+                            true
+                        }
+                        android.view.KeyEvent.KEYCODE_DPAD_UP -> {
+                            focusIndex = (focusIndex - 1).coerceAtLeast(0)
+                            true
+                        }
+                        android.view.KeyEvent.KEYCODE_DPAD_LEFT, android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                            when (focusIndex) {
+                                engineIdx -> onMainEngineChange(if (mainEngineMode == "EXO") "WEB" else "EXO")
+                                bufferIdx -> {
+                                    val curPos = bufferOptions.indexOf(bufferSeconds).coerceAtLeast(0)
+                                    val delta = if (keyEvent.nativeKeyEvent.keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT) 1 else -1
+                                    val newPos = (curPos + delta).coerceIn(0, bufferOptions.size - 1)
+                                    onBufferSecondsChange(bufferOptions[newPos])
+                                }
+                            }
+                            true
+                        }
+                        android.view.KeyEvent.KEYCODE_DPAD_CENTER, android.view.KeyEvent.KEYCODE_ENTER, android.view.KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                            when (focusIndex) {
+                                in 0 until engineIdx -> {
+                                    val track = availableAudioTracks[focusIndex]
+                                    switchAudioTrack(exoPlayer, track)
+                                    Toast.makeText(context, "Выбрано: ${track.label}", Toast.LENGTH_SHORT).show()
+                                }
+                                engineIdx -> onMainEngineChange(if (mainEngineMode == "EXO") "WEB" else "EXO")
+                                ffmpegIdx -> onFfmpegAudioChange(!ffmpegAudioEnabled)
+                                amlogicIdx -> onAmlogicFixChange(!amlogicFixEnabled)
+                                upscaleIdx -> onSmoothUpscaleChange(!smoothUpscaleEnabled)
+                                bufferIdx -> {
+                                    val curPos = bufferOptions.indexOf(bufferSeconds).coerceAtLeast(0)
+                                    onBufferSecondsChange(bufferOptions[(curPos + 1) % bufferOptions.size])
+                                }
+                            }
+                            true
+                        }
+                        android.view.KeyEvent.KEYCODE_BACK -> {
+                            onDismiss()
+                            true
+                        }
+                        else -> false
+                    }
+                }
                 .padding(24.dp)
                 .clickable(enabled = false) {}
         ) {
@@ -596,13 +674,18 @@ fun PlaybackSettingsDialog(
                             .border(1.dp, Color(0xFF1E293B), RoundedCornerShape(8.dp))
                             .padding(6.dp)
                     ) {
-                        availableAudioTracks.forEach { track ->
+                        availableAudioTracks.forEachIndexed { trackIdx, track ->
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(vertical = 2.dp)
                                     .clip(RoundedCornerShape(6.dp))
                                     .background(if (track.isSelected) Color(0xFF2563EB) else Color.Transparent)
+                                    .border(
+                                        width = if (focusIndex == trackIdx) 2.dp else 0.dp,
+                                        color = Color.White,
+                                        shape = RoundedCornerShape(6.dp)
+                                    )
                                     .clickable {
                                         switchAudioTrack(exoPlayer, track)
                                         Toast.makeText(context, "Выбрано: ${track.label}", Toast.LENGTH_SHORT).show()
@@ -634,6 +717,7 @@ fun PlaybackSettingsDialog(
                         title = "⚡ Media3 (Exo)",
                         subtitle = "Стандартный + Аппаратный",
                         active = mainEngineMode == "EXO",
+                        isFocused = focusIndex == availableAudioTracks.size,
                         modifier = Modifier.weight(1f)
                     ) { onMainEngineChange("EXO") }
 
@@ -641,6 +725,7 @@ fun PlaybackSettingsDialog(
                         title = "🌐 Web HLS",
                         subtitle = "Резервный HTML5",
                         active = mainEngineMode == "WEB",
+                        isFocused = focusIndex == availableAudioTracks.size,
                         modifier = Modifier.weight(1f)
                     ) { onMainEngineChange("WEB") }
                 }
@@ -661,6 +746,7 @@ fun PlaybackSettingsDialog(
                         title = "FFmpeg Audio",
                         desc = "Программный декодер звука (Отключите если тормозит)",
                         checked = ffmpegAudioEnabled,
+                        isFocused = focusIndex == availableAudioTracks.size + 1,
                         onCheckedChange = { onFfmpegAudioChange(it) }
                     )
 
@@ -668,8 +754,9 @@ fun PlaybackSettingsDialog(
 
                     SwitchRow(
                         title = "Amlogic Fix",
-                        desc = "Устраняет зависания на Android TV приставках",
+                        desc = "Katta bufer bilan sekin/eski kanallardagi \"typirlash\"ni kamaytiradi",
                         checked = amlogicFixEnabled,
+                        isFocused = focusIndex == availableAudioTracks.size + 2,
                         onCheckedChange = { onAmlogicFixChange(it) }
                     )
 
@@ -679,6 +766,7 @@ fun PlaybackSettingsDialog(
                         title = "Сглаживание SD",
                         desc = "Улучшает резкость SD каналов на ТВ",
                         checked = smoothUpscaleEnabled,
+                        isFocused = focusIndex == availableAudioTracks.size + 3,
                         onCheckedChange = { onSmoothUpscaleChange(it) }
                     )
                 }
@@ -693,6 +781,7 @@ fun PlaybackSettingsDialog(
                         RenderPillButton(
                             text = "${sec}s",
                             active = bufferSeconds == sec,
+                            isFocused = focusIndex == availableAudioTracks.size + 4 && bufferSeconds == sec,
                             modifier = Modifier.weight(1f)
                         ) { onBufferSecondsChange(sec) }
                     }

@@ -18,9 +18,10 @@ data class PersonalPlaylist(
  * (PersonalPlaylistScreen orqali).
  */
 private val BUILTIN_PLAYLISTS = listOf(
-    PersonalPlaylist(id = 9001L, name = "Mirovoy TV — Asosiy", url = "https://mirovoytv.uz/playlists/c042aeff.m3u8"),
-    PersonalPlaylist(id = 9002L, name = "Mirovoy TV — Qo'shimcha", url = "https://mirovoytv.uz/playlists/b62e592a.m3u"),
-    PersonalPlaylist(id = 9003L, name = "Mirovoy TV — Zaxira", url = "https://mirovoytv.uz/playlists/813bc163.m3u")
+    PersonalPlaylist(id = 9001L, name = "Mirovoy TV 1", url = "https://mirovoytv.uz/playlists/c042aeff.m3u8"),
+    PersonalPlaylist(id = 9002L, name = "Mirovoy TV 2", url = "https://mirovoytv.uz/playlists/b62e592a.m3u"),
+    PersonalPlaylist(id = 9003L, name = "Mirovoy TV 3", url = "https://mirovoytv.uz/playlists/813bc163.m3u"),
+    PersonalPlaylist(id = 9004L, name = "Mediatek", url = "https://mirovoytv.uz/playlists/77aa14e5.m3u8")
 )
 
 class PersonalPlaylistStore(context: Context) {
