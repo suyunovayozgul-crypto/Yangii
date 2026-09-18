@@ -12,11 +12,11 @@ jobs:
       - name: Kodni olish
         uses: actions/checkout@v4
 
-      - name: JDK 25 o'rnatish
+      - name: JDK 17 o'rnatish
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '25'
+          java-version: '17'
 
       - name: Android SDK o'rnatish
         uses: android-actions/setup-android@v3
@@ -32,7 +32,9 @@ jobs:
       - name: Doimiy debug-keystore o'rnatish (imzo bir xil bo'lishi uchun)
         run: |
           mkdir -p ~/.android
-          cp debug.keystore ~/.android/debug.keystore
+          cp $GITHUB_WORKSPACE/debug.keystore ~/.android/debug.keystore
+          echo "Keystore o'rnatildi:"
+          ls -la ~/.android/debug.keystore
 
       - name: Debug APK yasash
         run: ./gradlew assembleDebug --stacktrace
