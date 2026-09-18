@@ -29,6 +29,11 @@ jobs:
       - name: Gradle ishga tushirish huquqi
         run: chmod +x gradlew
 
+      - name: Doimiy debug-keystore o'rnatish (imzo bir xil bo'lishi uchun)
+        run: |
+          mkdir -p ~/.android
+          cp debug.keystore ~/.android/debug.keystore
+
       - name: Debug APK yasash
         run: ./gradlew assembleDebug --stacktrace
 
