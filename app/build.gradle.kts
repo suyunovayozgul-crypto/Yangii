@@ -11,8 +11,8 @@ android {
         applicationId = "uz.mirivoytv.iptv"
         minSdk = 24
         targetSdk = 35
-        versionCode = 27
-        versionName = "1.27"
+        versionCode = 28
+        versionName = "1.28"
 
         ndk {
             abiFilters.addAll(setOf("armeabi-v7a", "arm64-v8a"))
