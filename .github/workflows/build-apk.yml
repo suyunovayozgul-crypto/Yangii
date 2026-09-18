@@ -1,5 +1,4 @@
-        with:
-    name: Build APK
+name: Build APK
 
 on:
   push:
@@ -52,5 +51,4 @@ jobs:
           name: v${{ steps.ver.outputs.code }}
           files: app/build/outputs/apk/debug/*.apk
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}      name: MirovoyTV-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
