@@ -1,4 +1,5 @@
-name: Build APK
+        with:
+    name: Build APK
 
 on:
   push:
@@ -36,4 +37,20 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: MirovoyTV-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+
+      - name: versionCode'ni o'qish
+        id: ver
+        run: |
+          CODE=$(grep -m1 'versionCode' app/build.gradle.kts | grep -oE '[0-9]+')
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+
+      - name: GitHub Release yaratish va APK biriktirish
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.code }}
+          name: v${{ steps.ver.outputs.code }}
+          files: app/build/outputs/apk/debug/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}      name: MirovoyTV-debug-apk
           path: app/build/outputs/apk/debug/*.apk
