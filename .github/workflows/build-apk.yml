@@ -12,26 +12,47 @@ jobs:
       - name: Kodni olish
         uses: actions/checkout@v4
 
-      - name: JDK 25 o'rnatish
+      - name: JDK 17 o'rnatish
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '25'
+          java-version: '17'
 
       - name: Android SDK o'rnatish
         uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools"
 
-      - name: Kerakli SDK platformasini o'rnatish (compileSdk 36)
+      - name: Kerakli SDK o'rnatish
         run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
 
-      - name: Gradle ishga tushirish huquqi
+      - name: Gradle huquqi
         run: chmod +x gradlew
 
-      - name: Debug APK yasash
-        run: ./gradlew assembleDebug --stacktrace
+      - name: Release APK yasash
+        run: ./gradlew assembleRelease --stacktrace
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.Mirovoy_sekret }}
+          KEY_ALIAS: mirovoy
+          KEY_PASSWORD: ${{ secrets.Mirovoy_sekret }}
 
-      - name: APK'ni saqlash (Actions natijasida yuklab olish uchun)
+      - name: APK saqlash
         uses: actions/upload-artifact@v4
         with:
-          name: MirovoyTV-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: MirovoyTV-release-apk
+          path: app/build/outputs/apk/release/*.apk
+
+      - name: versionCode o'qish
+        id: ver
+        run: |
+          CODE=$(grep -m1 'versionCode' app/build.gradle.kts | grep -oE '[0-9]+')
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+
+      - name: GitHub Release yaratish
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.code }}
+          name: v${{ steps.ver.outputs.code }}
+          files: app/build/outputs/apk/release/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
