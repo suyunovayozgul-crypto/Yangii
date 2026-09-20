@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "uz.mirovoy.iptv"
+    namespace = "uz.oktv.iptv"
     compileSdk = 36
 
     defaultConfig {
