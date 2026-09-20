@@ -11,8 +11,8 @@ android {
         applicationId = "uz.mirivoytv.iptv"
         minSdk = 24
         targetSdk = 35
-        versionCode = 27
-        versionName = "1.27"
+        versionCode = 32
+        versionName = "1.32"
 
         ndk {
             abiFilters.addAll(setOf("armeabi-v7a", "arm64-v8a"))
@@ -21,16 +21,29 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = rootProject.file("mirovoy_release.jks")
+            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: "Mirovoy2024!"
+            keyAlias = System.getenv("KEY_ALIAS") ?: "mirovoy"
+            keyPassword = System.getenv("KEY_PASSWORD") ?: "Mirovoy2024!"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
             isShrinkResources = false
-            // Автоподпись дебаг-ключом, чтобы релиз сразу ставился на телевизоры
-            signingConfig = signingConfigs.getByName("debug")
+            // ✅ Release keystore — ogohlantirish chiqmaydi
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+        }
+        debug {
+            // Debug ham release keystore — bir xil imzo
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
@@ -60,10 +73,7 @@ dependencies {
     implementation(libs.androidx.media3.exoplayer.hls)
     implementation(libs.androidx.media3.ui)
 
-    // FFmpeg software decoders for problematic IPTV audio (AC-3/E-AC-3/DTS).
     implementation("io.github.anilbeesetti:nextlib-media3ext:1.10.1-0.13.0")
-
-    // Загрузка логотипов каналов
     implementation("io.coil-kt:coil-compose:2.6.0")
 
     testImplementation(libs.junit)
