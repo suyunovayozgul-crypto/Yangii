@@ -1131,3 +1131,76 @@ fun ExitConfirmDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
         dialogFocusRequester.requestFocus()
     }
 }
+
+@Composable
+fun EpgUrlDialog(
+    context: android.content.Context,
+    onDismiss: () -> Unit
+) {
+    val (u1, u2, u3) = EpgRepository.getUserUrls(context)
+    var url1 by remember { mutableStateOf(u1) }
+    var url2 by remember { mutableStateOf(u2) }
+    var url3 by remember { mutableStateOf(u3) }
+
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF0D1322), androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text("📡 EPG URL sozlamalari", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Text("Asosiy EPG avtomatik ishlaydi. Qo'shimcha URL qo'shishingiz mumkin:", color = Color(0xFF94A3B8), fontSize = 12.sp)
+
+            listOf(
+                Triple("EPG URL 1", url1, { v: String -> url1 = v }),
+                Triple("EPG URL 2", url2, { v: String -> url2 = v }),
+                Triple("EPG URL 3", url3, { v: String -> url3 = v })
+            ).forEach { (label, value, onChange) ->
+                Column {
+                    Text(label, color = Color(0xFF94A3B8), fontSize = 11.sp)
+                    androidx.compose.foundation.text.BasicTextField(
+                        value = value,
+                        onValueChange = onChange,
+                        textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 12.sp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF070B14), androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+                            .padding(10.dp),
+                        decorationBox = { inner ->
+                            if (value.isEmpty()) Text("https://...", color = Color(0xFF475569), fontSize = 12.sp)
+                            inner()
+                        }
+                    )
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .background(Color(0xFF2563EB), androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+                        .clickable {
+                            EpgRepository.saveUserUrls(context, url1, url2, url3)
+                            onDismiss()
+                        }
+                        .padding(10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("Saqlash", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .background(Color(0xFF1E293B), androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+                        .clickable { onDismiss() }
+                        .padding(10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("Bekor", color = Color(0xFF94A3B8), fontSize = 13.sp)
+                }
+            }
+        }
+    }
+}

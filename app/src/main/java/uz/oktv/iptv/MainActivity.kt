@@ -158,6 +158,8 @@ fun MainAppController() {
     var opened by remember {
         mutableStateOf(false)
     }
+    // Home ekrani ko'rsatilsinmi
+    var showHome by remember { mutableStateOf(false) }
 
     var loadingSavedPlaylist by remember {
         mutableStateOf(true)
@@ -193,6 +195,7 @@ fun MainAppController() {
                     loadedCategories = result.categories
                     loadedEpg = emptyMap()
                     opened = true
+                    showHome = true
                     loadingSavedPlaylist = false
                 }
 
@@ -250,7 +253,31 @@ fun MainAppController() {
 
                 startupError = null
                 opened = true
+                showHome = true
             }
+        )
+
+    } else if (showHome) {
+
+        HomeScreen(
+            channels = loadedChannels,
+            epgMap = loadedEpg,
+            subscriptionExpires = run {
+                val prefs = androidx.compose.ui.platform.LocalContext.current
+                    .getSharedPreferences("OKTV_PREFS", android.content.Context.MODE_PRIVATE)
+                prefs.getString("subscription_expires_at", "") ?: ""
+            },
+            onLiveTv = { showHome = false },
+            onMovies = { showHome = false },
+            onSport = { showHome = false },
+            onSeries = { showHome = false },
+            onPlaylist = {
+                showHome = false
+                opened = false
+            },
+            onSettings = { showPlaybackSettingsDialog = true },
+            onRefresh = { startEpgUpdate() },
+            onExit = { showHome = false; opened = false }
         )
 
     } else {
@@ -263,6 +290,7 @@ fun MainAppController() {
             onLogout = {
 
                 opened = false
+                showHome = false
                 loadedChannels = emptyList()
                 loadedCategories = listOf("Все", "❤️ Избранное")
                 loadedEpg = emptyMap()
@@ -629,6 +657,7 @@ fun StalkerNativeApp(
     var searchFilteredChannels by remember { mutableStateOf<List<M3UChannel>>(emptyList()) }
 
     var showEpgUpdateDialog by remember { mutableStateOf(false) }
+    var showEpgUrlDialog by remember { mutableStateOf(false) }
     var epgUpdateStatus by remember { mutableStateOf("Готово к обновлению") }
     var epgUpdateProgress by remember { mutableFloatStateOf(0f) }
 
@@ -854,7 +883,7 @@ fun StalkerNativeApp(
     }
 
     val startEpgUpdate = {
-        showEpgUpdateDialog = true
+        // EPG yuklanish dialog ko'rsatilmaydi — fon rejimida ishlaydi
         epgUpdateStatus = "Скачивание телепрограммы (gz)..."
         epgUpdateProgress = 0.1f
 
@@ -881,37 +910,34 @@ fun StalkerNativeApp(
                     epgScheduleMap = resultMap
                     epgUpdateProgress = 1.0f
                     epgUpdateStatus = "Телепрограмма успешно обновлена! [OK]"
-                    Toast.makeText(context, "Телепрограмма успешно обновлена!", Toast.LENGTH_SHORT).show()
-                    delay(1000)
-                    showEpgUpdateDialog = false
+                    EpgRepository.markUpdated(context)
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     epgUpdateStatus = "Ошибка обновления EPG!"
-                    Toast.makeText(context, "Ошибка обновления EPG!", Toast.LENGTH_SHORT).show()
-                    delay(1500)
-                    showEpgUpdateDialog = false
+
                 }
             }
         }
     }
 
+    // EPG: birinchi ochilganda va haftada bir marta fon rejimida yuklanadi
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
-            val cacheGzFile = File(context.cacheDir, "epg_cache.xml.gz")
-            if (cacheGzFile.exists() && (System.currentTimeMillis() - cacheGzFile.lastModified() < 24 * 3600 * 1000)) {
+            val cacheGzFile = EpgRepository.cacheFile(context.cacheDir)
+            if (EpgRepository.isCacheFresh(cacheGzFile) && !EpgRepository.needsUpdate(context)) {
+                // Cache yangi — faqat parse qilamiz
                 try {
                     val resultMap = parseEpgFileSafely(cacheGzFile)
-                    withContext(Dispatchers.Main) {
-                        epgScheduleMap = resultMap
-                    }
+                    withContext(Dispatchers.Main) { epgScheduleMap = resultMap }
                 } catch (e: Exception) {
                     e.printStackTrace()
+                    // Cache buzilgan — yuklaymiz
+                    withContext(Dispatchers.Main) { startEpgUpdate() }
                 }
             } else {
-                withContext(Dispatchers.Main) {
-                    startEpgUpdate()
-                }
+                // Birinchi marta yoki haftasi o'tgan — fon rejimida yuklaymiz
+                withContext(Dispatchers.Main) { startEpgUpdate() }
             }
         }
     }
@@ -2553,6 +2579,13 @@ fun StalkerNativeApp(
                                 }
                             }
                             item {
+                                SideNavButton(icon = "📡", text = "EPG URL sozlamalari", active = sideMenuIndex == 61) {
+                                    sideMenuIndex = 61
+                                    showSideMenu = false
+                                    showEpgUrlDialog = true
+                                }
+                            }
+                            item {
                                 SideNavButton(icon = "🌐", text = "${Strings.get("language", currentLang)}: ${currentLang.title}", active = sideMenuIndex == 7) {
                                     sideMenuIndex = 7
                                     showSideMenu = false
@@ -3713,6 +3746,13 @@ fun StalkerNativeApp(
                 delay(100)
                 searchFocusRequester.requestFocus()
             }
+        }
+
+        if (showEpgUrlDialog) {
+            EpgUrlDialog(
+                context = context,
+                onDismiss = { showEpgUrlDialog = false }
+            )
         }
 
         if (showEpgUpdateDialog) {
